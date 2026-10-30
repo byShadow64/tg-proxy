@@ -310,10 +310,14 @@ class H2WireTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(fresh[2], bodies[2])
             self.respond(fresh, b'n' * 40)
             self.assertEqual(await asyncio.wait_for(channel.receive(), 1), b'n' * 40)
+            # Count the outstanding poll before completing it. Consuming its
+            # reply can legitimately wake recovery to start the next poll.
+            self.assertEqual(channel.replay_requests, 1)
+            self.assertIn(poll[1], self.transport.connection.streams)
+            self.assertTrue(self.resets.empty(), 'the outstanding normal poll was reset')
             self.respond(poll, b'd' * (128 * 1024))
             self.assertEqual(await asyncio.wait_for(channel.receive(), 1), b'd' * (128 * 1024))
             self.assertEqual(channel.replay_rotations, 0)
-            self.assertEqual(channel.replay_requests, 1)
 
     async def test_replay_rotation_does_not_interrupt_upload(self):
         channel = _HttpChannel(self.lane, 1, 'replay-upload-test')

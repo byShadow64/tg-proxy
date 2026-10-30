@@ -1,29 +1,26 @@
 # Документация TG Proxy
 
-Начните с руководства для своего устройства. Для обычного подключения отдельный
-сервер не требуется.
+## Начало работы
 
-- [Быстрый старт и возможности](../README.md)
+- [Быстрый старт](../README.md)
 - [Windows](RU/README.windows.md)
 - [Android](../android/README.md)
-- [Подключение и режимы Helper](RU/Helper.md)
-- [Настройка Helper через SSH](SSH_SETUP.md)
+- [Helper](RU/Helper.md) и [установка сервера через SSH](SSH_SETUP.md)
 - [Параметры Windows](RU/TrayConfig.md)
-- [Cloudflare Proxy](RU/CfProxy.md) и [Worker](RU/CfWorker.md)
 
-## Сборка и сопровождение
+## Дополнительные маршруты
 
-- [Сборка Windows](RU/BuildFromSource.md)
+- [Cloudflare Proxy](RU/CfProxy.md)
+- [Cloudflare Worker](RU/CfWorker.md)
+- [Fake TLS и nginx](RU/FakeTlsNginx.md)
+- [Тестовые DC](RU/TestDc.md)
+
+## Исходники
+
+- [Сборка настольной версии](RU/BuildFromSource.md)
 - [Сборка Android](../android/BUILDING.md)
 - [Обновления Android](../android/docs/ANDROID_UPDATES.md)
-- [Модель регистрации устройств](DEVICE_REGISTRY.md)
-- [Publisher и единый пакет выпуска](PUBLISHER.md)
-- [Работа с GitHub](GITHUB_WORKFLOW.md)
-- [Состояние проекта и границы проверок](PROJECT_STATE.md)
-- [История Windows](../CHANGELOG.md) и [Android](../android/CHANGELOG.md)
+- [Linux](RU/README.linux.md), [macOS](RU/README.macos.md), [Docker](RU/README.docker.md)
 - [Участие в разработке](CONTRIBUTING.md)
+- [История Windows](../CHANGELOG.md) и [Android](../android/CHANGELOG.md)
 - [English](EN/README.md)
-
-Linux, macOS и Docker имеют отдельные инструкции в разделах RU и EN. Наличие
-исходного entry point не означает готовность проверенного бинарного выпуска
-для каждой платформы.

@@ -70,7 +70,7 @@ jobs:
       - name: Prepare public artifacts
         run: python packaging/prepare_release.py --bundle-output dist/publication
       - name: Verify unsigned bundle integrity without executing its source
-        run: python -c "from publisher.bundle import load_bundle; b = load_bundle('dist/publication'); print('Unsigned CI bundle:', b.version, b.bundle_id)"
+        run: python -c "from release_tools.bundle import load_bundle; b = load_bundle('dist/publication'); print('Unsigned CI bundle:', b.version, b.bundle_id)"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: TgWsProxy-unsigned-publication-bundle

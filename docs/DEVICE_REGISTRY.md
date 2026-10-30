@@ -1,8 +1,6 @@
 # Registered-client Helper registry v1
 
-Specified for Windows 1.15.3 and Android 0.1.7-dev. Publisher 1.0.4 validates
-the Windows publication bundle independently. This is a protocol specification;
-completed checks and remaining limits are recorded in [PROJECT_STATE](PROJECT_STATE.md).
+Protocol for IP-based connection to an enrolled Helper from TG Proxy.
 
 ## Access model
 
@@ -85,12 +83,9 @@ provide hardware identity or an absolute denial-of-service guarantee.
 The Helper independently checks the central signature, signed config, Helper
 identity, pin, lease lifetime, connection/frame and bandwidth budgets. Registered
 data frames cannot be empty; each frame is charged at least 4 KiB against the
-resource quota (not a monetary bill). Complete FIN messages and FIFO control/data
-are preserved after the confirmed whole/fragment/whole Telegram regression. Admission
+resource quota (not a monetary bill). Complete FIN messages and FIFO control/data are preserved. Admission
 must include raw sockets still waiting for TLS. Reconnects and fresh leases must
-not reset a device's traffic budget. The payload list and hashes are generated for each exact build. A protocol description
-is not a claim that the current client or server release audit is complete.
-Registered traffic permits at most 32 concurrent sessions globally and 2 MiB per
+not reset a device's traffic budget. Registered traffic permits at most 32 concurrent sessions globally and 2 MiB per
 message, with upstream queue1. Upload reserves the entire bounded message atomically,
 then sends one unfragmented binary WebSocket frame; async-iterator fragmentation is
 not compatible with Telegram's initialization path. Default token buckets allow
@@ -121,8 +116,7 @@ state. If an enrollment request may have committed but its response was lost,
 report the state as unconfirmed, retain the agent identity for owner review and
 do not promise an atomic cross-server rollback.
 
-## Verification status
+## Interoperability vectors
 
-Shared synthetic vectors: `tests/fixtures/helper_registry_v1.json` and the Android
-core test resources. Test credentials must never be deployed. Current unit, local TLS, frozen, native UI, APK and physical-device results belong to
-[PROJECT_STATE.md](PROJECT_STATE.md), not to this protocol specification.
+Synthetic protocol vectors are available in `tests/fixtures/helper_registry_v1.json`
+and Android core test resources. Do not deploy test credentials.

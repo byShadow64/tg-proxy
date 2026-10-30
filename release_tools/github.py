@@ -1,4 +1,4 @@
-"""Publish exact approved release bytes through GitHub's HTTPS REST API.
+"""Promote exact approved release bytes from a trusted GitHub Actions run.
 
 No tag replacement, asset deletion, rebuilding, or project code execution is
 performed. Tokens remain in memory and are never included in reported errors.
@@ -6,7 +6,6 @@ performed. Tokens remain in memory and are never included in reported errors.
 from __future__ import annotations
 
 import hashlib
-import base64
 import http.client
 import json
 import math
@@ -114,7 +113,7 @@ class GitHubClient:
             # original file is never reopened after verification or streamed
             # directly to GitHub, including when a same-size file is replaced.
             expected_size = kwargs.get("expected_size")
-            maximum = 600 * 1024 * 1024 if Path(upload).name == "publication-bundle.zip" else MAX_ASSET
+            maximum = MAX_ASSET
             if type(expected_size) is not int or not 0 < expected_size <= maximum or not isinstance(expected_hash, str) or _DIGEST.fullmatch(expected_hash) is None:
                 raise GitHubError("bundle_invalid")
             try:
@@ -341,8 +340,8 @@ class GitHubClient:
 
 
 def _bundle_inputs(bundle):
-    from publisher.bundle import revalidate_bundle
-    from publisher.trust import verify_approval
+    from release_tools.bundle import revalidate_bundle
+    from release_tools.trust import verify_approval
     try:
         checked = revalidate_bundle(bundle)
         if checked is not None:
@@ -446,8 +445,8 @@ def _remote_checks(client, bundle, repository, *, require_ci, allow_missing_tag=
     active_runs = []
     for status in ("queued", "in_progress", "waiting"):
         if client.trusted_run_id is not None and status == "queued":
-            # The workflow concurrency group queues later publishers. They
-            # cannot write yet and must not interrupt the current publisher.
+            # The workflow concurrency group queues later release jobs. They
+            # cannot write yet and must not interrupt the current release job.
             continue
         active_runs.extend(client.pages(prefix + "/actions/workflows/build.yml/runs?status=" + status, key="workflow_runs"))
     if any(not isinstance(run, dict) for run in active_runs):
@@ -470,33 +469,6 @@ def _remote_checks(client, bundle, repository, *, require_ci, allow_missing_tag=
     return {"repository": repository, "version": bundle.version, "tag": tag, "source_commit": bundle.source_commit, "login": profile["login"], "default_branch": default, "ci_verified": bool(require_ci), "tag_missing": tag_missing}, release
 
 
-def preflight_github(bundle, repository, token, emit=None, cancel=None, *, require_ci=True, allow_missing_tag=False, _client=None):
-    repository = _repository(repository)
-    _check_cancel(cancel)
-    _emit(emit, "validating")
-    bundle, expected, approval = _bundle_inputs(bundle)
-    client = _client or GitHubClient(token, cancel=cancel, emit=emit)
-    facts, release = _remote_checks(client, bundle, repository, require_ci=require_ci, allow_missing_tag=allow_missing_tag)
-    if release is not None:
-        published = release.get("draft") is False
-        if published and not _notes_match(release, bundle.notes):
-            raise GitHubError("release_notes_conflict")
-        remote = _release_assets(client, "/repos/" + repository, _positive_id(release.get("id")))
-        if published and set(remote) != ASSETS:
-            raise GitHubError("asset_conflict")
-        for name, asset in remote.items():
-            if asset.get("state") != "uploaded" or type(asset.get("size")) is not int or asset["size"] != expected[name]["size"]:
-                raise GitHubError("asset_conflict")
-            digest = asset.get("digest")
-            if digest is None:
-                _emit(emit, "preflight_assets", asset=name)
-                client.verify_asset(repository, asset, expected[name]["sha256"], expected[name]["size"])
-            elif digest != "sha256:" + expected[name]["sha256"]:
-                raise GitHubError("asset_conflict")
-    facts.update(status="ready", bundle_id=bundle.bundle_id, approval_verified=True, release_exists=release is not None,
-                 release_draft=bool(release and release.get("draft")), assets=expected)
-    _emit(emit, "preflight_complete")
-    return facts
 
 
 def _release_assets(client, prefix, release_id):
@@ -528,8 +500,10 @@ def publish_github(bundle, repository, token, emit=None, cancel=None, *, require
     repository = _repository(repository)
     _check_cancel(cancel)
     bundle, expected, approval = _bundle_inputs(bundle)
-    client = _client or GitHubClient(token, cancel=cancel, emit=emit)
-    facts, release = _remote_checks(client, bundle, repository, require_ci=require_ci)
+    client = trusted_actions_client(repository, token, emit, cancel, _client=_client)
+    if not require_ci:
+        raise GitHubError("successful_trusted_ci_required")
+    facts, release = _remote_checks(client, bundle, repository, require_ci=True)
     prefix = "/repos/" + repository
     created = False
     if release is None:
@@ -565,7 +539,7 @@ def publish_github(bundle, repository, token, emit=None, cancel=None, *, require
         remote = _release_assets(client, prefix, release_id)
         _verify_all(client, repository, remote, expected)
         _check_cancel(cancel)
-        # Another publisher must not have advanced latest/tag while uploads ran.
+        # Another release job must not have advanced latest/tag while uploads ran.
         _no_downgrade(client, prefix, bundle.version)
         if _commit_for_tag(client, prefix, facts["tag"]) != bundle.source_commit:
             raise GitHubError("tag_conflict")
@@ -588,109 +562,22 @@ def publish_github(bundle, repository, token, emit=None, cancel=None, *, require
     return report
 
 
+# Wire identifiers retained for already distributed signed-bundle senders.
+# This module does not prepare input drafts, dispatch workflows or store keys.
 WORKFLOW_MARKER = "TGPROXY_EXACT_BUNDLE_PUBLISHER_V1"
 INPUT_ASSET = "publication-bundle.zip"
 MAX_BUNDLE_ARCHIVE = 600 * 1024 * 1024
 _BUNDLE_FILES = {"manifest.json", "source.zip", "RELEASE_NOTES.md", "approval.json"} | {"assets/" + name for name in ASSETS}
 
 
-def prepare_github_draft(bundle, repository, token, approval=None, emit=None, cancel=None, *, _client=None):
-    """Upload a signed data-only input into a separate unpublished input draft."""
-    from publisher.bundle import export_bundle, revalidate_bundle
-    from publisher.trust import load_approval
-    repository = _repository(repository)
-    bundle = revalidate_bundle(bundle)
-    try:
-        approval = load_approval(bundle, approval)
-    except Exception as exc:
-        raise GitHubError(getattr(exc, "code", "approval_required")) from None
-    client = _client or GitHubClient(token, cancel=cancel, emit=emit)
-    facts, _ = _remote_checks(client, bundle, repository, require_ci=True, allow_missing_tag=True)
-    prefix = "/repos/" + repository
-    staging_tag = "publisher-input-" + bundle.bundle_id
-    releases = client.pages(prefix + "/releases")
-    if any(not isinstance(release, dict) for release in releases):
-        raise GitHubError("invalid_response")
-    drafts = [release for release in releases if release.get("tag_name") == staging_tag]
-    if len(drafts) > 1:
-        raise GitHubError("draft_input_conflict")
-    draft = drafts[0] if drafts else None
-    if draft is not None and draft.get("draft") is not True:
-        raise GitHubError("draft_input_conflict")
-    with tempfile.TemporaryDirectory(prefix="tg-publisher-input-") as temporary:
-        archive_path = Path(temporary) / INPUT_ASSET
-        _check_cancel(cancel)
-        export_bundle(bundle, approval, archive_path)
-        _check_cancel(cancel)
-        size = archive_path.stat().st_size
-        revalidate_bundle(bundle)
-        if size > MAX_BUNDLE_ARCHIVE:
-            raise GitHubError("bundle_too_large")
-        digest = hashlib.sha256()
-        with archive_path.open("rb") as stream:
-            while chunk := stream.read(256 * 1024):
-                digest.update(chunk)
-        archive_hash = digest.hexdigest()
-        if draft is None:
-            _emit(emit, "creating_input_draft")
-            # This draft is a private data container, never the application release.
-            # Its target remains the current default branch; it is never published.
-            draft = client.json("POST", prefix + "/releases", {"tag_name": staging_tag,
-                                "name": "Publisher input " + bundle.version,
-                                "body": "Unpublished approved release input. Do not publish this draft.",
-                                "draft": True, "prerelease": False, "make_latest": "false"})
-        release_id = _positive_id(draft.get("id"))
-        remote = client.pages(prefix + f"/releases/{release_id}/assets")
-        if len(remote) > 1 or any(item.get("name") != INPUT_ASSET for item in remote):
-            raise GitHubError("draft_input_conflict")
-        if remote:
-            asset = remote[0]
-        else:
-            asset = client.json("POST", prefix + f"/releases/{release_id}/assets?" + urlencode({"name": INPUT_ASSET}), upload=archive_path, size=size, sha256=archive_hash)
-        client.verify_asset(repository, asset, archive_hash, size)
-    return {"status": "draft_input_ready", "repository": repository, "version": bundle.version,
-            "tag": "v" + bundle.version, "source_commit": bundle.source_commit,
-            "bundle_id": bundle.bundle_id, "draft_release_id": release_id,
-            "bundle_asset_id": _positive_id(asset.get("id")), "bundle_sha256": archive_hash,
-            "draft_url": f"https://github.com/{repository}/releases", "verified": True}
 
 
-def dispatch_release_workflow(prepared, repository, token, emit=None, cancel=None, *, _client=None):
-    repository = _repository(repository)
-    client = _client or GitHubClient(token, cancel=cancel, emit=emit)
-    if not isinstance(prepared, dict) or prepared.get("repository") != repository or prepared.get("status") != "draft_input_ready":
-        raise GitHubError("invalid_workflow_input")
-    tag = prepared.get("tag", "")
-    _version(tag[1:] if tag.startswith("v") else "")
-    digest = prepared.get("bundle_sha256")
-    if not isinstance(digest, str) or _DIGEST.fullmatch(digest) is None:
-        raise GitHubError("invalid_workflow_input")
-    repo = client.json("GET", "/repos/" + repository)
-    if not isinstance(repo, dict):
-        raise GitHubError("invalid_response")
-    default = repo.get("default_branch")
-    if not isinstance(default, str) or not default or default.lower() == "staging":
-        raise GitHubError("invalid_default_branch")
-    data = client.json("GET", "/repos/" + repository + "/contents/.github/workflows/build.yml?" + urlencode({"ref": default}))
-    try:
-        source = base64.b64decode(data["content"], validate=False).decode("utf-8")
-    except (KeyError, TypeError, ValueError, UnicodeError):
-        raise GitHubError("trusted_workflow_not_deployed") from None
-    if WORKFLOW_MARKER not in source or "draft_release_id:" not in source or "bundle_sha256:" not in source:
-        raise GitHubError("trusted_workflow_not_deployed")
-    inputs = {name: str(_positive_id(prepared[name])) for name in ("draft_release_id", "bundle_asset_id")}
-    inputs.update(bundle_sha256=digest, tag=tag)
-    _check_cancel(cancel)
-    client.json("POST", "/repos/" + repository + "/actions/workflows/build.yml/dispatches", {"ref": default, "inputs": inputs})
-    _emit(emit, "workflow_dispatched")
-    return {"status": "workflow_dispatched", "repository": repository,
-            "tag": tag, "workflow_url": f"https://github.com/{repository}/actions/workflows/build.yml", "inputs": inputs}
 
 
 def download_draft_bundle(repository, token, release_id, asset_id, expected_sha256, output, *, cancel=None, emit=None, _client=None):
     """Fetch eight allowlisted input files; no input source or EXE is executed."""
-    from publisher.bundle import load_bundle
-    from publisher.trust import verify_approval
+    from release_tools.bundle import load_bundle
+    from release_tools.trust import verify_approval
     repository = _repository(repository)
     release_id, asset_id = _positive_id(release_id), _positive_id(asset_id)
     if not isinstance(expected_sha256, str) or _DIGEST.fullmatch(expected_sha256) is None:
@@ -774,7 +661,7 @@ def trusted_actions_client(repository, token, emit=None, cancel=None, *, _client
 
 
 def create_missing_tag_for_actions(bundle, repository, token, emit=None, cancel=None, *, _client=None):
-    """Create once with GITHUB_TOKEN; never available to the GUI's PAT path."""
+    """Create once only after verifying the trusted Actions run context."""
     bundle, _, _ = _bundle_inputs(bundle)
     client = trusted_actions_client(repository, token, emit, cancel, _client=_client)
     facts, _ = _remote_checks(client, bundle, repository, require_ci=True, allow_missing_tag=True)
@@ -791,36 +678,3 @@ def verify_workflow_bundle(bundle, repository, token, emit=None, cancel=None, *,
     client = trusted_actions_client(repository, token, emit, cancel, _client=_client)
     facts, _ = _remote_checks(client, bundle, repository, require_ci=True, allow_missing_tag=True, require_write=False)
     return {**facts, "status": "verified", "bundle_id": bundle.bundle_id, "assets": expected, "approval_verified": True}
-
-
-def verify_github_publication(bundle, repository, token, emit=None, cancel=None, *, _client=None):
-    """Manual read-only result check; never creates or dispatches anything."""
-    repository = _repository(repository)
-    bundle, expected, _ = _bundle_inputs(bundle)
-    client = _client or GitHubClient(token, emit=emit, cancel=cancel)
-    prefix = "/repos/" + repository
-    repo = client.json("GET", prefix)
-    if not isinstance(repo, dict) or str(repo.get("full_name", "")).lower() != repository.lower() or repo.get("private") is not False:
-        raise GitHubError("repository_mismatch")
-    tag = "v" + bundle.version
-    release = _release_by_tag(client, prefix, tag)
-    facts = {"repository": repository, "version": bundle.version, "tag": tag, "source_commit": bundle.source_commit,
-             "bundle_id": bundle.bundle_id, "release_url": f"https://github.com/{repository}/releases/tag/{tag}", "verified": False}
-    if release is None:
-        active = []
-        for status in ("queued", "in_progress", "waiting"):
-            active.extend(client.pages(prefix + "/actions/workflows/build.yml/runs?status=" + status, key="workflow_runs"))
-        return {**facts, "status": "queued" if active else "not_published"}
-    if not isinstance(release, dict) or release.get("tag_name") != tag or release.get("prerelease") is not False:
-        raise GitHubError("release_conflict")
-    if release.get("draft") is True:
-        return {**facts, "status": "draft"}
-    if release.get("draft") is not False or _commit_for_tag(client, prefix, tag) != bundle.source_commit:
-        raise GitHubError("release_conflict")
-    if not _notes_match(release, bundle.notes):
-        raise GitHubError("release_notes_conflict")
-    assets = _release_assets(client, prefix, _positive_id(release.get("id")))
-    _verify_all(client, repository, assets, expected, public=True)
-    latest = client.json("GET", prefix + "/releases/latest", missing=True)
-    return {**facts, "status": "published_and_verified", "verified": True, "assets": expected,
-            "is_latest": isinstance(latest, dict) and latest.get("tag_name") == tag}

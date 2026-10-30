@@ -21,7 +21,8 @@ import zipfile
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from publisher import github, trust
+from release_tools import github, trust
+from tests.release_fixtures import sign_test_approval
 
 
 REPO = "example-owner/tg-proxy"
@@ -84,9 +85,6 @@ class FakeAPI(BaseHTTPRequestHandler):
             return self.send(200, {"workflow_runs": [run for run in self.server.active_runs if not run.get("status") or run["status"] == status]})
         if path == prefix + "/actions/runs/99":
             return self.send(200, {"id": 99, "path": ".github/workflows/build.yml", "event": "workflow_dispatch", "head_sha": COMMIT, "head_branch": "main", "head_repository": {"full_name": REPO}})
-        if path == prefix + "/contents/.github/workflows/build.yml":
-            content = github.WORKFLOW_MARKER + "\ndraft_release_id:\nbundle_sha256:\n"
-            return self.send(200, {"content": base64.b64encode(content.encode()).decode()})
         if path == prefix + "/releases/latest":
             latest = self.server.latest
             return self.send(200, latest) if latest else self.send(404, {})
@@ -138,9 +136,6 @@ class FakeAPI(BaseHTTPRequestHandler):
             value = json.loads(body)
             self.server.tag_commit = value["sha"]
             return self.send(201, value)
-        if path.endswith("/dispatches"):
-            self.server.dispatched = json.loads(body)
-            return self.send(204, b"", binary=True)
         return self.send(404, {})
 
     def do_PATCH(self):
@@ -175,10 +170,10 @@ class GitHubPublicationTests(unittest.TestCase):
         self.private_key = Ed25519PrivateKey.generate()
         public = self.private_key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
         self.addCleanup(patch.stopall)
-        patch("publisher.bundle.revalidate_bundle", side_effect=lambda bundle: bundle).start()
-        patch("publisher.trust.revalidate_bundle", side_effect=lambda bundle: bundle).start()
+        patch("release_tools.bundle.revalidate_bundle", side_effect=lambda bundle: bundle).start()
+        patch("release_tools.trust.revalidate_bundle", side_effect=lambda bundle: bundle).start()
         patch.dict(trust.TRUSTED_APPROVAL_KEYS, {"test-key": base64.b64encode(public).decode()}).start()
-        self.approval = trust.approve_bundle(self.bundle, self.private_key, "test-key")
+        self.approval = sign_test_approval(self.bundle, self.private_key, "test-key")
         (root / "approval.json").write_text(json.dumps(self.approval), encoding="utf-8")
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), FakeAPI)
         self.server.requests, self.server.releases, self.server.assets = [], {}, {}
@@ -198,6 +193,10 @@ class GitHubPublicationTests(unittest.TestCase):
             self.hosts.append(host)
             return http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=2)
         self.client = github.GitHubClient(TOKEN, _connection_factory=factory)
+        environment = {"GITHUB_ACTIONS": "true", "GITHUB_EVENT_NAME": "workflow_dispatch",
+                       "GITHUB_REPOSITORY": REPO, "GITHUB_RUN_ID": "99",
+                       "GITHUB_SHA": COMMIT, "GITHUB_REF": "refs/heads/main"}
+        patch.dict(os.environ, environment).start()
 
     def publish(self):
         return github.publish_github(self.bundle, REPO, TOKEN, _client=self.client)
@@ -272,7 +271,7 @@ class GitHubPublicationTests(unittest.TestCase):
         self.assertEqual(raised.exception.retry_after, 60)
         github._COOLDOWNS.clear()
         self.server.failure = (403, {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1075"})
-        with patch("publisher.github.time.time", return_value=1000):
+        with patch("release_tools.github.time.time", return_value=1000):
             with self.assertRaises(github.GitHubError) as raised:
                 self.client.json("GET", "/user")
         self.assertEqual(raised.exception.retry_after, 75)
@@ -289,9 +288,6 @@ class GitHubPublicationTests(unittest.TestCase):
 
     def test_signed_approval_is_exact_and_domain_separated(self):
         self.assertTrue(trust.verify_approval(self.bundle)["verified"])
-        loaded = trust.load_approval(self.bundle)
-        self.assertEqual(loaded, self.approval)
-        self.assertIsNot(loaded, self.approval)
         self.bundle.notes += " changed"
         with self.assertRaisesRegex(trust.TrustError, "approval_identity"):
             trust.verify_approval(self.bundle)
@@ -302,9 +298,8 @@ class GitHubPublicationTests(unittest.TestCase):
 
     def test_unsigned_bundle_stops_before_network(self):
         (self.bundle.root / "approval.json").unlink()
-        with patch("publisher.trust.approval_file", return_value=self.bundle.root / "missing.json"):
-            with self.assertRaisesRegex(github.GitHubError, "approval_required"):
-                self.publish()
+        with self.assertRaisesRegex(github.GitHubError, "approval_required"):
+            self.publish()
         self.assertEqual(self.server.requests, [])
 
     def test_partial_draft_hidden_from_by_tag_is_resumed_from_list(self):
@@ -314,23 +309,8 @@ class GitHubPublicationTests(unittest.TestCase):
         self.assertEqual(self.publish()["status"], "published")
         self.assertFalse(any(method == "POST" and path == "/repos/" + REPO + "/releases" for method, path, _ in self.server.requests))
 
-    def test_read_only_result_check_pending_and_published(self):
-        self.assertEqual(github.verify_github_publication(self.bundle, REPO, TOKEN, _client=self.client)["status"], "not_published")
-        self.server.active_runs = [{"id": 90}]
-        self.assertEqual(github.verify_github_publication(self.bundle, REPO, TOKEN, _client=self.client)["status"], "queued")
-        self.server.active_runs = []
-        release = {"id": 10, "tag_name": "v1.14.9", "draft": False, "prerelease": False, "body": self.bundle.notes}
-        self.server.releases[10] = self.server.latest = release
-        self.server.assets[10] = {}
-        for asset_id, (name, path) in enumerate(self.bundle.assets.items(), start=100):
-            data = path.read_bytes()
-            self.server.assets[10][name] = {"id": asset_id, "name": name, "state": "uploaded", "size": len(data), "digest": "sha256:" + hashlib.sha256(data).hexdigest(), "data": data}
-        report = github.verify_github_publication(self.bundle, REPO, TOKEN, _client=self.client)
-        self.assertEqual(report["status"], "published_and_verified")
-        self.assertTrue(report["verified"])
-        self.assertFalse(any(method != "GET" for method, _, _ in self.server.requests))
 
-    def test_preflight_detects_existing_published_conflicts_before_writes(self):
+    def test_existing_published_conflicts_fail_without_any_writes(self):
         release = {"id": 10, "tag_name": "v1.14.9", "draft": False, "prerelease": False, "body": self.bundle.notes}
         self.server.releases[10] = self.server.latest = release
         values = {}
@@ -338,17 +318,17 @@ class GitHubPublicationTests(unittest.TestCase):
             data = path.read_bytes()
             values[name] = {"id": asset_id, "name": name, "state": "uploaded", "size": len(data), "digest": "sha256:" + hashlib.sha256(data).hexdigest(), "data": data}
         self.server.assets[10] = values
-        self.assertEqual(github.preflight_github(self.bundle, REPO, TOKEN, _client=self.client)["status"], "ready")
+        self.assertEqual(self.publish()["status"], "already_published")
         original = values["CHANGELOG.md"]["digest"]
         values["CHANGELOG.md"]["digest"] = "sha256:" + "0" * 64
         with self.assertRaisesRegex(github.GitHubError, "asset_conflict"):
-            github.preflight_github(self.bundle, REPO, TOKEN, _client=self.client)
+            self.publish()
         values["CHANGELOG.md"]["digest"] = None
-        self.assertEqual(github.preflight_github(self.bundle, REPO, TOKEN, _client=self.client)["status"], "ready")
+        self.assertEqual(self.publish()["status"], "already_published")
         values["CHANGELOG.md"]["digest"] = original
         release["body"] = "Wrong notes"
         with self.assertRaisesRegex(github.GitHubError, "release_notes_conflict"):
-            github.preflight_github(self.bundle, REPO, TOKEN, _client=self.client)
+            self.publish()
         self.assertFalse(any(method != "GET" for method, _, _ in self.server.requests))
 
     def test_transport_bounds_large_response(self):
@@ -398,18 +378,12 @@ class GitHubPublicationTests(unittest.TestCase):
                     github.download_draft_bundle(REPO, TOKEN, 10, 100, hashlib.sha256(data).hexdigest(), self.bundle.root / ("extract-" + str(len(self.server.requests))), _client=self.client)
         self.assertFalse((self.bundle.root / "escape.py").exists())
 
-    def test_prepare_signed_input_and_dispatch_never_creates_tag(self):
-        self.server.tag_commit = None
-        report = github.prepare_github_draft(self.bundle, REPO, TOKEN, self.approval, _client=self.client)
-        self.assertEqual(report["status"], "draft_input_ready")
-        self.assertEqual(len(self.server.releases), 1)
-        draft = next(iter(self.server.releases.values()))
-        self.assertTrue(draft["draft"])
-        self.assertTrue(draft["tag_name"].startswith("publisher-input-"))
-        dispatched = github.dispatch_release_workflow(report, REPO, TOKEN, _client=self.client)
-        self.assertEqual(dispatched["status"], "workflow_dispatched")
-        self.assertEqual(self.server.dispatched["ref"], "main")
-        self.assertFalse(any("/git/refs" in path for _, path, _ in self.server.requests))
+
+    def test_public_promotion_requires_trusted_actions_context_before_writes(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(github.GitHubError, "trusted_actions_context_required"):
+                self.publish()
+        self.assertEqual(self.server.requests, [])
 
     def test_bootstrap_requires_api_verified_actions_context(self):
         with patch.dict(os.environ, {}, clear=True):

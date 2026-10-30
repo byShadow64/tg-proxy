@@ -1,18 +1,9 @@
-# Private owner-code Helper pairing
-
-This protocol belongs to the existing private Helper mode.
-It gives the owner-authorized client the existing
-private token. It is distinct from the new work-in-progress
-[registered-client registry](DEVICE_REGISTRY.md), which never publishes that
-private token. Entering only an IP is supported by the new mode only after
-explicit owner enrollment; it must not enable a private server implicitly.
-For both SSH installers and conversion consent see [SSH_SETUP.md](SSH_SETUP.md).
-
----
-
 # Helper owner-code pairing v1
 
-The standalone Helper keeps its current TLS certificate and global bearer token.
+This optional private-server protocol uses an owner-issued code. IP-only access
+for registered clients is described in [DEVICE_REGISTRY.md](DEVICE_REGISTRY.md).
+
+The standalone Helper keeps its TLS certificate and global bearer token.
 An owner authenticated over SSH runs:
 
 ```sh
@@ -96,5 +87,4 @@ the background worker and discards its result.
 
 Public synthetic vectors for Python/Android interoperability are in
 `tests/fixtures/helper_pairing_v1.json`; these credentials must never be used
-on a real server. Loopback-only TLS tests also cover replay, MITM certificate
-substitution, concurrent redemption, parser limits and cancellation.
+on a real server.

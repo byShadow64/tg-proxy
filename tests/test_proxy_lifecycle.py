@@ -4,6 +4,7 @@ import socket
 import threading
 import time
 import unittest
+import weakref
 from contextlib import ExitStack
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -199,6 +200,150 @@ class ProxyLifecycleTest(unittest.TestCase):
         self.assertFalse(tray_common.proxy_running())
         self.assertTrue(tray_common.stop_proxy())
         self.assertTrue(tray_common.stop_proxy())
+
+
+class AcceptedClientOwnershipTest(unittest.IsolatedAsyncioTestCase):
+    async def exercise_listener(self, *, admit_at_stop):
+        runtime = ProxyConfig(host="127.0.0.1", port=0, secret="a" * 32,
+                              dc_redirects={}, pool_size=0, fallback_cfproxy=False,
+                              cfproxy_h2_media=False)
+        bound, accepted, stop = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        original_start, original_create, original_wait = (
+            asyncio.start_server, asyncio.create_task, asyncio.wait)
+        servers, callbacks, held, writers, tasks, peers = [], [], [], [], [], []
+        active_before = tg_ws_proxy.stats.connections_active
+        total_before = tg_ws_proxy.stats.connections_total
+        runner = None
+
+        def create_task(coro, *args, **kwargs):
+            task = original_create(coro, *args, **kwargs)
+            if getattr(coro, "cr_code", None) is tg_ws_proxy._handle_client.__code__:
+                # An observer must not keep an otherwise orphaned writer alive.
+                writers.append(weakref.ref(coro.cr_frame.f_locals["writer"]))
+                tasks.append(task)
+            return task
+
+        async def start_server(callback, *args, **kwargs):
+            callbacks.append(callback)
+
+            def connected(reader, writer):
+                if admit_at_stop:
+                    held.append((reader, writer))
+                else:
+                    callback(reader, writer)
+                accepted.set()
+
+            server = await original_start(connected, *args, **kwargs)
+            servers.append(server)
+            bound.set()
+            return server
+
+        async def wait(waiters, *args, **kwargs):
+            answer = await original_wait(waiters, *args, **kwargs)
+            if asyncio.current_task() is runner and stop.is_set() and held:
+                # Order the real accept callback immediately before _run sees
+                # stop_event. Its original finally must cancel the new task
+                # before its first coroutine step; the test never cancels it.
+                reader, writer = held.pop()
+                callbacks[0](reader, writer)
+                del reader, writer
+            return answer
+
+        facts = {}
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(tg_ws_proxy, "proxy_config", runtime))
+            stack.enter_context(patch.object(tg_ws_proxy, "MAX_CLIENT_CONNECTIONS", 1))
+            stack.enter_context(patch.object(tg_ws_proxy, "MAX_CLIENT_CONNECTIONS_PER_IP", 1))
+            stack.enter_context(patch.object(tg_ws_proxy, "start_cfproxy_domain_refresh",
+                                            side_effect=AssertionError("External refresh is forbidden")))
+            stack.enter_context(patch.object(tg_ws_proxy.ws_pool, "warmup", AsyncMock()))
+            stack.enter_context(patch.object(tg_ws_proxy.cf_worker_pool, "warmup", AsyncMock()))
+            stack.enter_context(patch.object(asyncio, "start_server", start_server))
+            stack.enter_context(patch.object(asyncio, "create_task", create_task))
+            stack.enter_context(patch.object(asyncio, "wait", wait))
+            try:
+                runner = original_create(tg_ws_proxy._run(stop))
+                await asyncio.wait_for(bound.wait(), 1)
+                port = servers[0].sockets[0].getsockname()[1]
+                reader, writer = await asyncio.open_connection("127.0.0.1", port)
+                peers.append(writer)
+                del writer
+                await asyncio.wait_for(accepted.wait(), 1)
+                if not admit_at_stop:
+                    # A started client keeps the single admission slot until
+                    # shutdown. A second real TCP connection must be rejected.
+                    await asyncio.sleep(0)
+                    self.assertEqual(len(tasks), 1)
+                    self.assertEqual(tg_ws_proxy.stats.connections_active - active_before, 1)
+                    rejected, writer = await asyncio.open_connection("127.0.0.1", port)
+                    peers.append(writer)
+                    del writer
+                    self.assertEqual(await asyncio.wait_for(rejected.read(1), 1), b"")
+                    self.assertEqual(len(tasks), 1)
+                stop.set()
+                try:
+                    await asyncio.wait_for(asyncio.shield(runner), 1)
+                    facts["stopped"] = True
+                except asyncio.TimeoutError:
+                    facts["stopped"] = False
+                try:
+                    facts["eof"] = await asyncio.wait_for(reader.read(1), 1) == b""
+                except asyncio.TimeoutError:
+                    facts["eof"] = False
+                cells = dict(zip(callbacks[0].__code__.co_freevars, callbacks[0].__closure__))
+                facts.update(handler_entered=tg_ws_proxy.stats.connections_total != total_before,
+                             task_cancelled=tasks[0].cancelled(),
+                             tracked=len(tg_ws_proxy._client_tasks),
+                             per_ip=dict(cells["connections_per_ip"].cell_contents),
+                             active=tg_ws_proxy.stats.connections_active - active_before,
+                             held=len(held))
+            finally:
+                stop.set()
+                for reference in writers:
+                    writer = reference()
+                    if writer is not None:
+                        writer.close()
+                        await asyncio.wait_for(writer.wait_closed(), 1)
+                for _, writer in held:
+                    writer.close()
+                    await asyncio.wait_for(writer.wait_closed(), 1)
+                held.clear()
+                for writer in peers:
+                    writer.close()
+                    await asyncio.wait_for(writer.wait_closed(), 1)
+                if runner is not None:
+                    try:
+                        await asyncio.wait_for(runner, 1)
+                    except BaseException:
+                        runner.cancel()
+                        await asyncio.gather(runner, return_exceptions=True)
+                for server in servers:
+                    server.close()
+                    await asyncio.wait_for(server.wait_closed(), 1)
+                await asyncio.sleep(0)
+                self.assertFalse(tg_ws_proxy._client_tasks)
+                self.assertEqual(tg_ws_proxy.stats.connections_active, active_before)
+                self.assertTrue(all(task.done() for task in tasks))
+                self.assertTrue(runner is None or runner.done())
+                self.assertTrue(all(not server.is_serving() and not server.sockets for server in servers))
+                self.assertTrue(all(reference() is None or reference().is_closing() for reference in writers))
+        return facts
+
+    async def test_stop_closes_client_cancelled_before_its_first_step(self):
+        facts = await self.exercise_listener(admit_at_stop=True)
+        self.assertFalse(facts["handler_entered"])
+        self.assertTrue(facts["task_cancelled"])
+        self.assertEqual((facts["tracked"], facts["per_ip"], facts["active"], facts["held"]),
+                         (0, {}, 0, 0))
+        self.assertTrue(facts["eof"], "A cancelled, unstarted client retained its accepted socket")
+        self.assertTrue(facts["stopped"], "The listener retained a cancelled client's transport")
+
+    async def test_started_client_closes_and_releases_its_admission_slot(self):
+        facts = await self.exercise_listener(admit_at_stop=False)
+        self.assertTrue(facts["handler_entered"])
+        self.assertTrue(facts["eof"])
+        self.assertTrue(facts["stopped"])
+        self.assertEqual((facts["tracked"], facts["per_ip"], facts["active"]), (0, {}, 0))
 
 
 if __name__ == "__main__":

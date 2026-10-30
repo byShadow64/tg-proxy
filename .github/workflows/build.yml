@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       draft_release_id:
-        description: Unpublished publisher-input draft ID
+        description: Unpublished signed-input draft ID
         required: true
         type: string
       bundle_asset_id:
@@ -43,9 +43,9 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
-      - name: Install publisher verification dependencies only
+      - name: Install release verification dependencies only
         run: >-
-          python -m pip install --only-binary=:all: --require-hashes -r packaging/publisher-requirements.lock
+          python -m pip install --only-binary=:all: --require-hashes -r packaging/release-verification-requirements.lock
       - name: Verify signed input, source commit, tag and trusted CI
         env:
           GH_TOKEN: ${{ github.token }}
@@ -60,7 +60,7 @@ jobs:
           --bundle-asset-id "$env:ASSET_ID"
           --bundle-sha256 "$env:BUNDLE_SHA"
           --tag "$env:RELEASE_TAG"
-          --output "$env:RUNNER_TEMP/publisher-verify"
+          --output "$env:RUNNER_TEMP/release-verify"
           --verify-only
 
   publish:
@@ -79,9 +79,9 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
-      - name: Install publisher verification dependencies only
+      - name: Install release verification dependencies only
         run: >-
-          python -m pip install --only-binary=:all: --require-hashes -r packaging/publisher-requirements.lock
+          python -m pip install --only-binary=:all: --require-hashes -r packaging/release-verification-requirements.lock
       - name: Reverify and publish the exact approved assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -96,5 +96,5 @@ jobs:
           --bundle-asset-id "$env:ASSET_ID"
           --bundle-sha256 "$env:BUNDLE_SHA"
           --tag "$env:RELEASE_TAG"
-          --output "$env:RUNNER_TEMP/publisher-release"
+          --output "$env:RUNNER_TEMP/release-publish"
           --publish --create-missing-tag

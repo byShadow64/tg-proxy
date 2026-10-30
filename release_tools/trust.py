@@ -1,15 +1,16 @@
-"""Domain-separated approval of exact, independently tested release bundles."""
+"""Verify the domain-separated signed approval of an exact release bundle.
+
+Public-key verification only: no signer, local credential store or key discovery.
+"""
 from __future__ import annotations
 
 import base64
 import hashlib
 import json
-import os
 from pathlib import Path
-import re
 import stat
 
-from publisher.bundle import canonical_json, revalidate_bundle
+from release_tools.bundle import canonical_json, revalidate_bundle
 
 
 TRUSTED_APPROVAL_KEYS = {"tgproxy-2026-01": "/JUuGMEQXZSPxtFaxPZO0W6js51c+ocOXq1WL9Qe1z8="}
@@ -23,11 +24,6 @@ class TrustError(RuntimeError):
         super().__init__("Release approval: " + code)
 
 
-def approval_file(bundle_id):
-    if not isinstance(bundle_id, str) or re.fullmatch(r"[0-9a-f]{64}", bundle_id) is None:
-        raise TrustError("approval_identity")
-    base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / ".local" / "share")
-    return base / "TGProxyPublisher" / "approvals" / (bundle_id + ".json")
 
 
 def _payload(bundle):
@@ -39,25 +35,6 @@ def _payload(bundle):
             "notes_sha256": hashlib.sha256(bundle.notes.encode("utf-8")).hexdigest()}
 
 
-def approve_bundle(bundle, private_key, key_id):
-    """Sign only after the caller explicitly confirms completed testing.
-
-    Loading a bundle never calls this function. No key is read from disk here,
-    and approval is returned for the caller to save outside immutable bundles.
-    """
-    from cryptography.hazmat.primitives import serialization
-    try:
-        bundle = revalidate_bundle(bundle)
-        public = private_key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
-        if TRUSTED_APPROVAL_KEYS.get(key_id) != base64.b64encode(public).decode("ascii"):
-            raise TrustError("approval_key")
-        unsigned = {"schema": 1, "key_id": key_id, "payload": _payload(bundle)}
-        signature = private_key.sign(DOMAIN + canonical_json(unsigned))
-        return {**unsigned, "signature": base64.b64encode(signature).decode("ascii")}
-    except TrustError:
-        raise
-    except Exception as exc:
-        raise TrustError(getattr(exc, "code", "approval_signing_failed")) from None
 
 
 def _unique(items):
@@ -73,8 +50,6 @@ def _read_approval(bundle, approval):
     if approval is not None:
         return approval
     path = bundle.root / "approval.json"
-    if not path.exists():
-        path = approval_file(bundle.bundle_id)
     meta = path.lstat()
     if not stat.S_ISREG(meta.st_mode) or path.is_symlink() or getattr(path, "is_junction", lambda: False)() or meta.st_size > MAX_APPROVAL:
         raise TrustError("approval_file")
@@ -109,18 +84,3 @@ def verify_approval(bundle, approval=None, *, trusted_keys=None):
         raise
     except Exception:
         raise TrustError("approval_signature") from None
-
-
-def load_approval(bundle, approval=None):
-    """Return the validated signed envelope, never merely a verification flag."""
-    try:
-        bundle = revalidate_bundle(bundle)
-        approval = _read_approval(bundle, approval)
-        verify_approval(bundle, approval)
-        return json.loads(canonical_json(approval))
-    except FileNotFoundError:
-        raise TrustError("approval_required") from None
-    except TrustError:
-        raise
-    except Exception as exc:
-        raise TrustError(getattr(exc, "code", "approval_format")) from None

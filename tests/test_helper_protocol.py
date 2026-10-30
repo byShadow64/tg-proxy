@@ -3,6 +3,7 @@ import datetime
 import ipaddress
 import ssl
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -202,14 +203,65 @@ class HelperProtocolTest(unittest.IsolatedAsyncioTestCase):
             await connection._read_frame(0.02)
 
     async def test_data_progress_in_small_chunks_resets_stall_deadline(self):
-        reader = asyncio.StreamReader()
-        task = asyncio.create_task(read_frame(reader, 0.04, allow_idle=True))
-        await asyncio.sleep(0.06)  # No first header byte yet: an allowed idle.
-        reader.feed_data((4).to_bytes(4, "big"))
-        for value in (b"a", b"b", b"c", b"d"):
-            await asyncio.sleep(0.025)
-            reader.feed_data(value)
-        self.assertEqual(await asyncio.wait_for(task, 0.1), b"abcd")
+        loop = asyncio.get_running_loop()
+        clock, timeout = [loop.time()], 0.04
+        idle_started, reading = asyncio.Event(), asyncio.Queue()
+        budgets = []
+        real_wait_for = asyncio.wait_for
+
+        class ObservedReader(asyncio.StreamReader):
+            async def readexactly(self, size):
+                if size == 1:
+                    idle_started.set()
+                return await super().readexactly(size)
+
+            async def read(self, size):
+                reading.put_nowait(size)
+                return await super().read(size)
+
+        async def bounded_read(awaitable, timeout):
+            budgets.append(timeout)
+            return await real_wait_for(awaitable, timeout)
+
+        async def until(predicate):
+            # The watchdog uses wall time even while the isolated loop clock
+            # is controlled, so a broken reader cannot hang this fixture.
+            deadline = time.monotonic() + 1
+            while not predicate():
+                if time.monotonic() >= deadline:
+                    self.fail("Frame reader did not reach the next progress boundary")
+                await asyncio.sleep(0)
+
+        reader = ObservedReader()
+        with patch.object(loop, "time", side_effect=lambda: clock[0]), \
+                patch("helper_server.asyncio.wait_for", side_effect=bounded_read):
+            task = asyncio.create_task(read_frame(reader, timeout, allow_idle=True))
+            try:
+                await until(idle_started.is_set)
+                clock[0] += 0.06  # Quiet before the first header byte is allowed.
+                await asyncio.sleep(0)
+                self.assertFalse(task.done())
+                reader.feed_data((4).to_bytes(4, "big"))
+                body_started = clock[0]
+                for value in (b"a", b"b", b"c", b"d"):
+                    await until(lambda: not reading.empty() or task.done())
+                    self.assertFalse(task.done(), "Frame expired despite ongoing progress")
+                    reading.get_nowait()
+                    clock[0] += 0.025  # Each gap is below 40 ms, total is above it.
+                    reader.feed_data(value)
+                    await asyncio.sleep(0)
+                await until(task.done)
+                self.assertEqual(task.result(), b"abcd")
+                self.assertGreater(clock[0] - body_started, timeout)
+                self.assertGreaterEqual(len(budgets), 5)
+                self.assertTrue(all(budget == timeout for budget in budgets), budgets)
+            finally:
+                if not task.done():
+                    task.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await task
+                elif not task.cancelled():
+                    task.exception()  # Retrieve a failing fixture task before leaving its clock.
 
     async def test_idle_data_wait_is_cancellable(self):
         task = asyncio.create_task(read_frame(asyncio.StreamReader(), 0.02, allow_idle=True))

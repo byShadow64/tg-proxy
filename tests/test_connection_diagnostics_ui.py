@@ -1,5 +1,6 @@
 """Native CTk checks for diagnosis cancellation, privacy and view lifecycle."""
 import copy
+import gc
 import subprocess
 import sys
 import threading
@@ -125,8 +126,32 @@ if _NATIVE_MODE:
             deadline = time.monotonic() + timeout
             while not predicate():
                 if time.monotonic() >= deadline:
-                    self.fail("Connection check did not reach expected UI state")
+                    self.fail("Connection check did not reach expected UI state; " +
+                              repr(self.failure_state()))
                 self.pump()
+
+        def failure_state(self):
+            # Failure-only diagnostics: bounded scalar state and function/line
+            # frames; never inspect locals, configuration or report contents.
+            if not self.views:
+                return {"view": "missing"}
+            card = self.views[-1].connection_diagnostics
+            worker = card._worker
+            frame = sys._current_frames().get(worker.ident) if worker else None
+            frames = []
+            while frame is not None and len(frames) < 12:
+                frames.append((frame.f_code.co_name, frame.f_lineno))
+                frame = frame.f_back
+            queued = "busy"
+            if card._queue.mutex.acquire(False):
+                try:
+                    queued = len(card._queue.queue)
+                finally:
+                    card._queue.mutex.release()
+            return dict(completed=card.completed, total=card.total,
+                        checking=card.checking, stale=card.stale, closed=card.closed,
+                        queue=queued, worker_alive=bool(worker and worker.is_alive()),
+                        worker_frames=frames)
 
         def view(self, state=None):
             state = state if state is not None else {"alive": True, "identity": "original"}
@@ -148,6 +173,10 @@ if _NATIVE_MODE:
             root.deiconify()
             self.pump(80)
             self.assertEqual(root.title(), t("dashboard.title") + (" [Staging]" if "-staging." in __version__ else ""))
+            # This fixture pumps nested Tk events rather than a real mainloop.
+            # Retired Tk images/fonts must be finalized on their owner thread,
+            # before a later worker's allocations can trigger cyclic GC.
+            gc.collect()
             return view, callbacks, config
 
         def test_progress_cancel_retry_and_logs_navigation_are_non_blocking(self):
@@ -397,15 +426,22 @@ if _NATIVE_MODE:
                             rows = list(initial)
                             for completed, row in enumerate(rows, 1):
                                 emit(dict(kind="progress", result=row, completed=completed, total=103))
-                            first.wait(3)
+                            # These are explicit phases, not timed progression: a
+                            # busy native renderer must not skip the 100-result
+                            # phase merely because its worker wait expired.
+                            if not first.wait(10):
+                                raise AssertionError("Fixture's first phase was not released")
                             rows.append(result("cf", "error", "tls", dc=2))
                             emit(dict(kind="progress", result=rows[-1], completed=101, total=103))
-                            second.wait(3)
+                            if not second.wait(10):
+                                raise AssertionError("Fixture's second phase was not released")
                             rows.append(result("worker", dc=4))
                             emit(dict(kind="progress", result=rows[-1], completed=102, total=103))
-                            cancel.wait(3)
+                            if not cancel.wait(10):
+                                raise AssertionError("Fixture did not receive cancellation")
                             cleanup.set()
-                            finish.wait(3)
+                            if not finish.wait(10):
+                                raise AssertionError("Fixture cleanup phase was not released")
                             rows.append(result("helper", "cancelled", "cancelled"))
                             emit(dict(kind="progress", result=rows[-1], completed=103, total=103))
                             return report(rows, status="cancelled", recommendation="retry")

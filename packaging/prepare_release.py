@@ -70,7 +70,7 @@ def create_bundle(executable: Path, output: Path, *, build_commit=None):
     before publication. A manifest boolean alone is never publishing authority.
     """
     sys.path.insert(0, str(ROOT))
-    from publisher.bundle import load_bundle, _source_name
+    from release_tools.bundle import load_bundle, _source_name
     from proxy import __version__
     if (not isinstance(__version__, str)
             or re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", __version__) is None):

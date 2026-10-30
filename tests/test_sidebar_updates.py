@@ -30,8 +30,8 @@ if not _NATIVE_MODE:
             # CTk caches fonts/images in its first Tcl interpreter. Keep this
             # suite independent from the other native UI modules' Tk roots.
             result = subprocess.run(
-                [sys.executable, str(Path(__file__).resolve()), "--native-run"],
-                capture_output=True, text=True, timeout=35,
+                [sys.executable, "-X", "utf8", str(Path(__file__).resolve()), "--native-run"],
+                capture_output=True, text=True, encoding="utf-8", timeout=35,
             )
             if "NATIVE_DISPLAY_UNAVAILABLE" in result.stdout:
                 self.skipTest("Native Tk display is unavailable")
