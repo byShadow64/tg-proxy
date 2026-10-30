@@ -187,7 +187,43 @@ class PromoteReleaseTest(unittest.TestCase):
     def test_argument_errors_do_not_echo_accidental_command_line_token(self):
         code, report = self.run_cli(self.args("--verify-only") + ["--token", self.token])
         self.assertEqual((code, report["code"]), (1, "arguments"))
+        self.assertEqual(report["stage"], "arguments")
         self.trusted_actions_client.assert_not_called()
+
+    def test_failures_report_only_the_fixed_current_stage(self):
+        for name, stage in [
+            ("trusted_actions_client", "actions_context"),
+            ("download_draft_bundle", "download_input"),
+            ("verify_workflow_bundle", "verify_input"),
+            ("create_missing_tag_for_actions", "create_tag"),
+            ("publish_github", "publish"),
+        ]:
+            with self.subTest(stage=stage):
+                target = getattr(self, name)
+                # Neither a custom exception class name nor its text may leak.
+                failure_type = type("Secret_" + self.token, (RuntimeError,), {})
+                target.side_effect = failure_type("Authorization: " + self.token)
+                try:
+                    code, report = self.run_cli(self.args("--publish", "--create-missing-tag"))
+                finally:
+                    target.side_effect = None
+                self.assertEqual(code, 1)
+                self.assertEqual(report, {"status": "failed", "code": "publisher_failure",
+                                          "stage": stage})
+
+    def test_missing_dependency_reports_only_an_allowlisted_module_name(self):
+        for name in ("certifi", "pefile", "cryptography", "cffi", "pycparser", self.token):
+            with self.subTest(known=name != self.token):
+                self.trusted_actions_client.side_effect = ModuleNotFoundError(
+                    "secret error " + self.token, name=name, path="/private/" + self.token)
+                code, report = self.run_cli(self.args("--publish"))
+                expected = {"status": "failed", "stage": "actions_context",
+                            "code": "publisher_failure"}
+                if name != self.token:
+                    expected.update(code="verifier_dependency_missing", dependency=name)
+                self.assertEqual((code, report), (1, expected))
+        self.download_draft_bundle.assert_not_called()
+        self.publish_github.assert_not_called()
 
     def test_verify_only_cannot_enable_tag_creation(self):
         code, report = self.run_cli(self.args("--verify-only", "--create-missing-tag"))

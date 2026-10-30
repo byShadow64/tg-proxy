@@ -6,6 +6,7 @@ read only from GH_TOKEN; no token, response headers, or raw errors are printed.
 from __future__ import annotations
 
 import argparse
+from enum import Enum
 import json
 import os
 from pathlib import Path
@@ -28,6 +29,7 @@ from release_tools.github import (  # noqa: E402
 _REPOSITORY = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}\Z")
 _TAG = re.compile(r"v(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
+_VERIFIER_DEPENDENCIES = frozenset({"certifi", "pefile", "cryptography", "cffi", "pycparser"})
 _SAFE_ERROR_CODES = frozenset({
     "arguments", "invalid_token", "authentication_required", "permission_or_rate_limit",
     "write_access_required", "rate_limited", "not_found", "conflict", "http_error",
@@ -44,6 +46,15 @@ _SAFE_ERROR_CODES = frozenset({
     "approval_key", "approval_identity", "approval_signature", "pagination_limit",
     "verification_unconfirmed", "publication_unconfirmed", "publisher_failure",
 })
+
+
+class _FailureStage(str, Enum):
+    ARGUMENTS = "arguments"
+    ACTIONS_CONTEXT = "actions_context"
+    DOWNLOAD_INPUT = "download_input"
+    VERIFY_INPUT = "verify_input"
+    CREATE_TAG = "create_tag"
+    PUBLISH = "publish"
 
 
 class PromotionError(RuntimeError):
@@ -137,12 +148,22 @@ def _validate_inputs(args):
     return token, _isolated_output(args.output)
 
 
-def _safe_failure(exc):
+def _safe_failure(exc, stage):
+    # Stages and dependency names come only from fixed allowlists. Never report
+    # exception text, class names, import paths, headers, or command arguments.
+    if type(stage) is not _FailureStage:
+        stage = _FailureStage.ARGUMENTS
+    result = {"status": "failed", "code": "publisher_failure", "stage": stage.value}
     try:
+        if isinstance(exc, ModuleNotFoundError):
+            dependency = exc.name
+            if type(dependency) is str and dependency in _VERIFIER_DEPENDENCIES:
+                result.update(code="verifier_dependency_missing", dependency=dependency)
+                return result
         code = getattr(exc, "code", "publisher_failure")
-        if code not in _SAFE_ERROR_CODES:
+        if type(code) is not str or code not in _SAFE_ERROR_CODES:
             code = "publisher_failure"
-        result = {"status": "failed", "code": code}
+        result["code"] = code
         http_status = getattr(exc, "http_status", None)
         if type(http_status) is int and 100 <= http_status <= 599:
             result["http_status"] = http_status
@@ -151,18 +172,22 @@ def _safe_failure(exc):
             result["retry_after"] = retry
         return result
     except Exception:
-        return {"status": "failed", "code": "publisher_failure"}
+        return {"status": "failed", "code": "publisher_failure", "stage": stage.value}
 
 
 def main(argv=None):
+    stage = _FailureStage.ARGUMENTS
     try:
         args = _parser().parse_args(argv)
+        stage = _FailureStage.ACTIONS_CONTEXT
         token, output = _validate_inputs(args)
         client = trusted_actions_client(args.repository, token)
+        stage = _FailureStage.DOWNLOAD_INPUT
         bundle = download_draft_bundle(
             args.repository, token, args.draft_release_id, args.bundle_asset_id,
             args.bundle_sha256, output, _client=client,
         )
+        stage = _FailureStage.VERIFY_INPUT
         if args.tag != "v" + bundle.version:
             raise PromotionError("tag_mismatch")
         facts = verify_workflow_bundle(bundle, args.repository, token, _client=client)
@@ -177,10 +202,12 @@ def main(argv=None):
                   "source_commit": bundle.source_commit, "bundle_id": bundle.bundle_id,
                   "verified": True, "published": False}
         if args.publish:
+            stage = _FailureStage.CREATE_TAG
             if args.create_missing_tag:
                 create_missing_tag_for_actions(bundle, args.repository, token, _client=client)
             elif facts.get("tag_missing") is True:
                 raise PromotionError("tag_missing")
+            stage = _FailureStage.PUBLISH
             report = publish_github(bundle, args.repository, token, require_ci=True,
                                     _client=client)
             if (not isinstance(report, dict) or report.get("verified") is not True
@@ -192,10 +219,10 @@ def main(argv=None):
         print(json.dumps(result, ensure_ascii=True, sort_keys=True))
         return 0
     except KeyboardInterrupt:
-        print(json.dumps({"status": "failed", "code": "cancelled"}))
+        print(json.dumps(_safe_failure(PromotionError("cancelled"), stage), sort_keys=True))
         return 1
     except Exception as exc:
-        print(json.dumps(_safe_failure(exc), ensure_ascii=True, sort_keys=True))
+        print(json.dumps(_safe_failure(exc, stage), ensure_ascii=True, sort_keys=True))
         return 1
 
 
