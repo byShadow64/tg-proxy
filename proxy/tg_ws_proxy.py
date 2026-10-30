@@ -444,12 +444,18 @@ async def _run(stop_event: Optional[asyncio.Event] = None):
         _client_tasks.add(task)
 
         def release_client(done):
-            _client_tasks.discard(done)
-            remaining = connections_per_ip[ip] - 1
-            if remaining:
-                connections_per_ip[ip] = remaining
-            else:
-                connections_per_ip.pop(ip, None)
+            try:
+                # Cancellation before the coroutine's first step never enters
+                # _handle_client's finally. Admission still owns its socket.
+                if not w.is_closing():
+                    w.close()
+            finally:
+                _client_tasks.discard(done)
+                remaining = connections_per_ip[ip] - 1
+                if remaining:
+                    connections_per_ip[ip] = remaining
+                else:
+                    connections_per_ip.pop(ip, None)
 
         task.add_done_callback(release_client)
 
