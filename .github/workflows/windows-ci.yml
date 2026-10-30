@@ -47,8 +47,30 @@ jobs:
         working-directory: android
         run: bash ./gradlew --no-daemon --console=plain --max-workers=2 :core:test
 
+  release-verifier:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - name: Verify the isolated release dependency environment
+        shell: pwsh
+        run: |
+          python -m venv "$env:RUNNER_TEMP/release-verifier-env"
+          $verifierPython = "$env:RUNNER_TEMP/release-verifier-env/Scripts/python.exe"
+          & $verifierPython -m pip install --only-binary=:all: --require-hashes -r packaging/release-verification-requirements.lock
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $verifierPython -m pip check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $verifierPython -I -B -c "import pathlib, sys; sys.path.insert(0, str(pathlib.Path.cwd())); import certifi, pefile; from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey; from proxy.http_transport import create_connection, response_with_deadline; from release_tools.github import GitHubClient; from release_tools.bundle import load_bundle; from release_tools.trust import verify_approval; print('Isolated release verifier imports passed')"
+          exit $LASTEXITCODE
+
   build-windows:
-    needs: [tests, android-core]
+    needs: [tests, android-core, release-verifier]
     runs-on: windows-latest
     timeout-minutes: 30
     steps:

@@ -39,6 +39,23 @@ class ReleaseWorkflowTests(unittest.TestCase):
         source = (ROOT / "proxy/update_channel.py").read_text(encoding="utf-8")
         self.assertIn('UPDATE_MANIFEST_URL = "https://217.177.34.28/latest.json"', source)
 
+    def test_ci_checks_release_verifier_in_its_own_hash_locked_environment(self):
+        source = (ROOT / ".github/workflows/windows-ci.yml").read_text(encoding="utf-8")
+        match = re.search(r"(?ms)^  release-verifier:\n(.*?)(?=^  [a-z-]+:|\Z)", source)
+        self.assertIsNotNone(match)
+        job = match.group(1)
+        self.assertIn('python -m venv "$env:RUNNER_TEMP/release-verifier-env"', job)
+        self.assertNotIn("--system-site-packages", job)
+        self.assertIn("& $verifierPython -m pip install --only-binary=:all: --require-hashes -r packaging/release-verification-requirements.lock", job)
+        self.assertIn("& $verifierPython -m pip check", job)
+        self.assertIn("& $verifierPython -I -B -c", job)
+        self.assertIn("import certifi, pefile", job)
+        self.assertIn("from proxy.http_transport import create_connection, response_with_deadline", job)
+        self.assertIn("from release_tools.trust import verify_approval", job)
+        self.assertNotRegex(job, r'pip install\s+["\']?\.')
+        self.assertNotIn("GH_TOKEN", job)
+        self.assertIn("needs: [tests, android-core, release-verifier]", source)
+
 
 if __name__ == "__main__":
     unittest.main()
