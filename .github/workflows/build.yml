@@ -30,10 +30,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  verify:
+  fetch:
+    name: Fetch approved draft input
     if: github.repository == 'byShadow64/tg-proxy' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    outputs:
+      bundle_id: ${{ steps.fetch.outputs.bundle_id }}
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       # Only trusted default-branch code is checked out. Input ZIPs remain data.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -46,7 +53,9 @@ jobs:
       - name: Install release verification dependencies only
         run: >-
           python -m pip install --only-binary=:all: --require-hashes -r packaging/release-verification-requirements.lock
-      - name: Verify signed input, source commit, tag and trusted CI
+      # The privileged transport step never executes or extracts the input ZIP.
+      - name: Fetch the exact opaque signed input
+        id: fetch
         env:
           GH_TOKEN: ${{ github.token }}
           DRAFT_ID: ${{ inputs.draft_release_id }}
@@ -60,18 +69,30 @@ jobs:
           --bundle-asset-id "$env:ASSET_ID"
           --bundle-sha256 "$env:BUNDLE_SHA"
           --tag "$env:RELEASE_TAG"
-          --output "$env:RUNNER_TEMP/release-verify"
-          --verify-only
+          --output "$env:RUNNER_TEMP/release-fetch"
+          --fetch-only
+      - name: Preserve the exact input for the read-only verification job
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: publication-input-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-fetch/publication-bundle.zip
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          overwrite: false
+          archive: true
 
-  publish:
-    needs: verify
+  verify:
+    needs: fetch
     if: github.repository == 'byShadow64/tg-proxy' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     permissions:
-      contents: write
+      contents: read
       actions: read
     steps:
+      # Only trusted default-branch code is checked out. Input ZIPs remain data.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
@@ -82,13 +103,20 @@ jobs:
       - name: Install release verification dependencies only
         run: >-
           python -m pip install --only-binary=:all: --require-hashes -r packaging/release-verification-requirements.lock
-      - name: Reverify and publish the exact approved assets
+      - name: Download the exact input artifact from this workflow run
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.fetch.outputs.artifact_id }}
+          path: ${{ runner.temp }}/release-input
+          digest-mismatch: error
+      - name: Verify signed input, source commit, tag and trusted CI
         env:
           GH_TOKEN: ${{ github.token }}
           DRAFT_ID: ${{ inputs.draft_release_id }}
           ASSET_ID: ${{ inputs.bundle_asset_id }}
           BUNDLE_SHA: ${{ inputs.bundle_sha256 }}
           RELEASE_TAG: ${{ inputs.tag }}
+          INPUT_BUNDLE_ID: ${{ needs.fetch.outputs.bundle_id }}
         run: >-
           python -B packaging/promote_release.py
           --repository "$env:GITHUB_REPOSITORY"
@@ -96,5 +124,53 @@ jobs:
           --bundle-asset-id "$env:ASSET_ID"
           --bundle-sha256 "$env:BUNDLE_SHA"
           --tag "$env:RELEASE_TAG"
+          --input-archive "$env:RUNNER_TEMP/release-input/publication-bundle.zip"
+          --input-bundle-id "$env:INPUT_BUNDLE_ID"
+          --output "$env:RUNNER_TEMP/release-verify"
+          --verify-only
+
+  publish:
+    needs: [fetch, verify]
+    if: github.repository == 'byShadow64/tg-proxy' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      # Only trusted default-branch code is checked out. Input ZIPs remain data.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - name: Install release verification dependencies only
+        run: >-
+          python -m pip install --only-binary=:all: --require-hashes -r packaging/release-verification-requirements.lock
+      - name: Download the exact input artifact from this workflow run
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.fetch.outputs.artifact_id }}
+          path: ${{ runner.temp }}/release-input
+          digest-mismatch: error
+      - name: Reverify and publish the exact approved assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT_ID: ${{ inputs.draft_release_id }}
+          ASSET_ID: ${{ inputs.bundle_asset_id }}
+          BUNDLE_SHA: ${{ inputs.bundle_sha256 }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          INPUT_BUNDLE_ID: ${{ needs.fetch.outputs.bundle_id }}
+        run: >-
+          python -B packaging/promote_release.py
+          --repository "$env:GITHUB_REPOSITORY"
+          --draft-release-id "$env:DRAFT_ID"
+          --bundle-asset-id "$env:ASSET_ID"
+          --bundle-sha256 "$env:BUNDLE_SHA"
+          --tag "$env:RELEASE_TAG"
+          --input-archive "$env:RUNNER_TEMP/release-input/publication-bundle.zip"
+          --input-bundle-id "$env:INPUT_BUNDLE_ID"
           --output "$env:RUNNER_TEMP/release-publish"
           --publish --create-missing-tag

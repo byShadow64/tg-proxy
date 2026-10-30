@@ -6,6 +6,7 @@ performed. Tokens remain in memory and are never included in reported errors.
 from __future__ import annotations
 
 import hashlib
+from enum import Enum
 import http.client
 import json
 import math
@@ -38,6 +39,12 @@ _COOLDOWNS = {}
 _COOLDOWN_LOCK = threading.Lock()
 _HTTP_LOCK = threading.RLock()
 _LAST_WRITE = 0.
+
+
+class InputEndpoint(str, Enum):
+    DRAFT_METADATA = "draft_metadata"
+    ASSET_METADATA = "asset_metadata"
+    ASSET_DOWNLOAD = "asset_download"
 
 
 class GitHubError(RuntimeError):
@@ -574,68 +581,126 @@ _BUNDLE_FILES = {"manifest.json", "source.zip", "RELEASE_NOTES.md", "approval.js
 
 
 
-def download_draft_bundle(repository, token, release_id, asset_id, expected_sha256, output, *, cancel=None, emit=None, _client=None):
-    """Fetch eight allowlisted input files; no input source or EXE is executed."""
-    from release_tools.bundle import load_bundle
-    from release_tools.trust import verify_approval
+def download_draft_archive(repository, token, release_id, asset_id, expected_sha256, archive_path, *, cancel=None, emit=None, _client=None):
+    """Fetch one bounded immutable raw ZIP; never extract or execute its contents."""
     repository = _repository(repository)
     release_id, asset_id = _positive_id(release_id), _positive_id(asset_id)
     if not isinstance(expected_sha256, str) or _DIGEST.fullmatch(expected_sha256) is None:
         raise GitHubError("invalid_workflow_input")
+    archive_path = Path(archive_path)
+    if archive_path.exists() or archive_path.is_symlink():
+        raise GitHubError("output_exists")
     client = _client or GitHubClient(token, cancel=cancel, emit=emit)
     prefix = "/repos/" + repository
-    draft = client.json("GET", prefix + f"/releases/{release_id}")
-    if not isinstance(draft, dict) or draft.get("draft") is not True or not str(draft.get("tag_name", "")).startswith("publisher-input-"):
+    try:
+        draft = client.json("GET", prefix + f"/releases/{release_id}")
+    except GitHubError as exc:
+        exc.input_endpoint = InputEndpoint.DRAFT_METADATA
+        raise
+    tag = draft.get("tag_name") if isinstance(draft, dict) else None
+    match = re.fullmatch(r"publisher-input-([0-9a-f]{64})", tag) if type(tag) is str else None
+    if not isinstance(draft, dict) or draft.get("draft") is not True or match is None:
         raise GitHubError("draft_input_required")
-    assets = client.pages(prefix + f"/releases/{release_id}/assets")
+    try:
+        assets = client.pages(prefix + f"/releases/{release_id}/assets")
+    except GitHubError as exc:
+        exc.input_endpoint = InputEndpoint.ASSET_METADATA
+        raise
     if len(assets) != 1 or assets[0].get("id") != asset_id or assets[0].get("name") != INPUT_ASSET:
         raise GitHubError("draft_input_conflict")
     size = assets[0].get("size")
     if type(size) is not int or not 0 < size <= MAX_BUNDLE_ARCHIVE:
         raise GitHubError("bundle_too_large")
-    output = Path(output)
-    if output.exists():
-        raise GitHubError("output_exists")
-    output.mkdir(parents=True)
-    archive_path = output.parent / (output.name + ".input.zip")
-    if archive_path.exists():
-        raise GitHubError("output_exists")
     digest = hashlib.sha256()
     with archive_path.open("xb") as destination:
         def save(data):
             destination.write(data)
             digest.update(data)
-        _, count = client._request("GET", f"https://{API_HOST}{prefix}/releases/assets/{asset_id}", accept="application/octet-stream", redirects=True, max_bytes=size, sink=save)
+        try:
+            _, count = client._request("GET", f"https://{API_HOST}{prefix}/releases/assets/{asset_id}", accept="application/octet-stream", redirects=True, max_bytes=size, sink=save)
+        except GitHubError as exc:
+            exc.input_endpoint = InputEndpoint.ASSET_DOWNLOAD
+            raise
     if count != size or digest.hexdigest() != expected_sha256:
         raise GitHubError("draft_input_hash")
+    return match.group(1)
+
+
+def load_local_bundle_archive(archive_path, expected_sha256, expected_bundle_id, output, *, cancel=None):
+    """Hash a private snapshot, then validate exact eight data files and approval."""
+    from release_tools.bundle import load_bundle
+    from release_tools.trust import verify_approval
+    if (not isinstance(expected_sha256, str) or _DIGEST.fullmatch(expected_sha256) is None
+            or not isinstance(expected_bundle_id, str) or _DIGEST.fullmatch(expected_bundle_id) is None):
+        raise GitHubError("invalid_workflow_input")
+    archive_path, output = Path(archive_path), Path(output)
+    if output.exists() or output.is_symlink():
+        raise GitHubError("output_exists")
     try:
-        with zipfile.ZipFile(archive_path) as archive:
-            entries = archive.infolist()
-            if len(entries) != 8 or {item.filename for item in entries} != _BUNDLE_FILES or sum(item.file_size for item in entries) > MAX_BUNDLE_ARCHIVE:
-                raise GitHubError("bundle_archive")
-            for item in entries:
-                _check_cancel(cancel)
-                if item.is_dir() or item.flag_bits & 1 or ((item.external_attr >> 16) & 0o170000) not in (0, 0o100000) or item.file_size > MAX_ASSET:
-                    raise GitHubError("bundle_archive")
-                path = output / item.filename
-                path.parent.mkdir(parents=True, exist_ok=True)
-                with archive.open(item) as source, path.open("xb") as destination:
-                    written = 0
-                    while chunk := source.read(64 * 1024):
+        metadata = archive_path.lstat()
+        if (not stat.S_ISREG(metadata.st_mode) or archive_path.is_symlink()
+                or not 0 < metadata.st_size <= MAX_BUNDLE_ARCHIVE):
+            raise GitHubError("bundle_archive")
+        # Extraction uses these exact hashed bytes, even if an artifact path
+        # changes concurrently after validation. Downloaded code is never run.
+        with tempfile.TemporaryFile(mode="w+b") as snapshot:
+            digest, count = hashlib.sha256(), 0
+            with archive_path.open("rb") as raw:
+                while chunk := raw.read(64 * 1024):
+                    _check_cancel(cancel)
+                    count += len(chunk)
+                    if count > MAX_BUNDLE_ARCHIVE:
+                        raise GitHubError("bundle_too_large")
+                    digest.update(chunk)
+                    snapshot.write(chunk)
+            if count != metadata.st_size or digest.hexdigest() != expected_sha256:
+                raise GitHubError("draft_input_hash")
+            snapshot.seek(0)
+            output.mkdir(parents=True)
+            try:
+                with zipfile.ZipFile(snapshot) as archive:
+                    entries = archive.infolist()
+                    if len(entries) != 8 or {item.filename for item in entries} != _BUNDLE_FILES or sum(item.file_size for item in entries) > MAX_BUNDLE_ARCHIVE:
+                        raise GitHubError("bundle_archive")
+                    for item in entries:
                         _check_cancel(cancel)
-                        written += len(chunk)
-                        if written > item.file_size:
+                        if item.is_dir() or item.flag_bits & 1 or ((item.external_attr >> 16) & 0o170000) not in (0, 0o100000) or item.file_size > MAX_ASSET:
                             raise GitHubError("bundle_archive")
-                        destination.write(chunk)
-        bundle = load_bundle(output)
-        verify_approval(bundle)
+                        path = output / item.filename
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        with archive.open(item) as source, path.open("xb") as destination:
+                            written = 0
+                            while chunk := source.read(64 * 1024):
+                                _check_cancel(cancel)
+                                written += len(chunk)
+                                if written > item.file_size:
+                                    raise GitHubError("bundle_archive")
+                                destination.write(chunk)
+                bundle = load_bundle(output)
+                verify_approval(bundle)
+            except GitHubError:
+                raise
+            except Exception as exc:
+                raise GitHubError(getattr(exc, "code", "bundle_archive")) from None
     except GitHubError:
         raise
     except Exception as exc:
         raise GitHubError(getattr(exc, "code", "bundle_archive")) from None
-    if draft["tag_name"] != "publisher-input-" + bundle.bundle_id:
+    if bundle.bundle_id != expected_bundle_id:
         raise GitHubError("draft_input_conflict")
     return bundle
+
+
+def download_draft_bundle(repository, token, release_id, asset_id, expected_sha256, output, *, cancel=None, emit=None, _client=None):
+    """Legacy combined path; all guards are shared with artifact-based jobs."""
+    output = Path(output)
+    if output.exists() or output.is_symlink():
+        raise GitHubError("output_exists")
+    archive_path = output.parent / (output.name + ".input.zip")
+    bundle_id = download_draft_archive(repository, token, release_id, asset_id,
+        expected_sha256, archive_path, cancel=cancel, emit=emit, _client=_client)
+    return load_local_bundle_archive(archive_path, expected_sha256, bundle_id, output, cancel=cancel)
+
 
 
 def trusted_actions_client(repository, token, emit=None, cancel=None, *, _client=None):
