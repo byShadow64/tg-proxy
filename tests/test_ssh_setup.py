@@ -475,6 +475,10 @@ class SSHSocketDeadlineTest(unittest.TestCase):
         addresses = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))
                      for port in (101, 102, 103)]
         sockets = []
+        # Integer simulated time avoids Windows clock/timer granularity making
+        # a third, tiny candidate budget appear after two real sleeps.
+        clock_ns = [0]
+        real_monotonic = time.monotonic
 
         class FailingSocket:
             def __init__(self):
@@ -486,20 +490,24 @@ class SSHSocketDeadlineTest(unittest.TestCase):
                 self.timeout = timeout
 
             def connect(self, address):
-                time.sleep(min(.04, self.timeout))
+                remaining_ns = round(self.timeout * 1_000_000_000)
+                clock_ns[0] += min(40_000_000, remaining_ns)
                 raise TimeoutError("synthetic connect timeout")
 
             def close(self):
                 self.closed = True
 
-        with patch.object(ssh_setup.socket, "getaddrinfo", return_value=addresses), \
+        with patch.object(ssh_setup.time, "monotonic", side_effect=lambda: clock_ns[0] / 1_000_000_000), \
+                patch.object(ssh_setup.socket, "getaddrinfo", return_value=addresses), \
                 patch.object(ssh_setup.socket, "socket", side_effect=lambda *args: FailingSocket()):
-            started = time.monotonic()
+            started = real_monotonic()
             with self.assertRaises(TimeoutError):
                 ssh_setup._open_connection(("multiple.invalid", 22), .06)
-            self.assertLess(time.monotonic() - started, .4)
+            self.assertLess(real_monotonic() - started, .4)
         self.assertEqual(len(sockets), 2)
-        self.assertLess(sockets[1].timeout, sockets[0].timeout)
+        self.assertEqual(clock_ns[0], 60_000_000)
+        self.assertEqual([round(sock.timeout * 1_000_000_000) for sock in sockets],
+                         [60_000_000, 20_000_000])
         self.assertTrue(all(sock.closed for sock in sockets))
 
 
