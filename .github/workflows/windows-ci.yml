@@ -30,7 +30,7 @@ jobs:
       - name: Install project and build dependencies
         run: python -m pip install ".[helper-server]" pytest
       - name: Run tests
-        run: python -m pytest -q
+        run: python -m pytest -q -o faulthandler_timeout=120 -o faulthandler_exit_on_timeout=false
 
   android-core:
     runs-on: ubuntu-latest
