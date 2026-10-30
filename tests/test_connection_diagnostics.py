@@ -292,7 +292,8 @@ class ProtocolTest(unittest.IsolatedAsyncioTestCase):
                             b"Connection: Upgrade\r\nSec-WebSocket-Protocol: binary\r\nSec-WebSocket-Accept: " +
                             (b"invalid" if case == "bad" else accept) + b"\r\n")
                         if case == "large":
-                            response += (b"X-Padding: " + b"a" * 100 + b"\r\n") * 400
+                            # Above the 32 KiB protocol cap, below StreamReader's 64 KiB line limit.
+                            response += b"X-Padding: " + b"a" * (40 * 1024) + b"\r\n"
                         writer.write(response + b"\r\n")
                         await writer.drain()
                         await reader.read()
@@ -320,8 +321,11 @@ class ProtocolTest(unittest.IsolatedAsyncioTestCase):
                             connection = await d._attempt(probe, snapshot())
                             await d._close_connection(connection)
                         else:
-                            with self.assertRaises(TimeoutError if case == "slow" else WsHandshakeError):
+                            with self.assertRaises(TimeoutError if case == "slow" else WsHandshakeError) as error:
                                 await d._attempt(probe, snapshot())
+                            if case == "large":
+                                self.assertEqual(error.exception.status_code, 0)
+                                self.assertEqual(error.exception.status_line, "response headers too large")
                     await asyncio.wait_for(closed.wait(), 1)
                 finally:
                     server.close()

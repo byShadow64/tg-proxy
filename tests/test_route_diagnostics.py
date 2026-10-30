@@ -147,7 +147,8 @@ class RouteTransportTest(unittest.IsolatedAsyncioTestCase):
                                 b'Sec-WebSocket-Protocol: binary\r\nSec-WebSocket-Accept: ' +
                                 (b'wrong' if mode == 'challenge' else accept) + b'\r\n')
                             if mode == 'headers':
-                                response += (b'X-Fill: ' + b'a' * 100 + b'\r\n') * 400
+                                # Cross the 32 KiB protocol cap in one bounded StreamReader line.
+                                response += b'X-Fill: ' + b'a' * (40 * 1024) + b'\r\n'
                             response += b'\r\n'
                         writer.write(response)
                         await writer.drain()

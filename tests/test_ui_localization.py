@@ -1,4 +1,5 @@
 """Exercise the actual desktop widgets with synthetic state, without networking."""
+import gc
 import logging
 import json
 import re
@@ -32,8 +33,15 @@ def setUpModule():
 
 
 def tearDownModule():
-    if _APP is not None:
-        _APP.destroy()
+    global _APP
+    try:
+        if _APP is not None:
+            _APP.destroy()
+    finally:
+        _APP = None
+        # Finalize native Tk cycles on their owner thread, before later tests
+        # model the separate headless installer using a background worker.
+        gc.collect()
 
 
 def descendants(widget):

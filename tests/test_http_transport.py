@@ -1,12 +1,13 @@
 """Bounded HTTP resolver and real loopback connection/response cleanup."""
 import http.client
 import socket
+import ssl
 import threading
 import time
 import unittest
 from unittest import mock
 
-from publisher import github
+from release_tools import github
 from proxy import http_transport
 from utils import update_check
 
@@ -96,30 +97,39 @@ class HTTPConnectionBoundsTests(unittest.TestCase):
         self.assertIs(factory.call_args.kwargs['response_class'], response.return_value)
 
 
-class PublisherResponseBoundsTests(unittest.TestCase):
+class ActionsResponseBoundsTests(unittest.TestCase):
     def test_slow_status_headers_and_chunk_framing_obey_absolute_deadline(self):
-        # The normal TLS/hostname checks remain in HTTPSConnection. A local
-        # HTTPConnection factory lets us exercise the real parser without
-        # credentials, public endpoints, or an injected fake response object.
+        # Prepare TLS trust and a connected loopback peer before the short
+        # response-parser budget. Separate tests cover bounded DNS/TCP setup;
+        # this one must reach the real status/header/chunk parser every time.
+        context = ssl.create_default_context()
         for prefix in (b'', b'HTTP/1.1 200 OK\r\nX-Test: ',
                        b'HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n1;'):
             with self.subTest(prefix=prefix), socket.socket() as listener:
                 listener.bind(('127.0.0.1', 0))
                 listener.listen()
                 listener.settimeout(2)
-                closed = threading.Event()
+                accepted, request_received, closed, stop = (threading.Event() for _ in range(4))
+                peers = []
 
                 def serve():
                     try:
                         with listener.accept()[0] as peer:
+                            peers.append(peer)
+                            accepted.set()
                             peer.settimeout(1)
                             data = b''
                             while b'\r\n\r\n' not in data:
-                                data += peer.recv(4096)
+                                chunk = peer.recv(4096)
+                                if not chunk:
+                                    return  # EOF before a complete request must not spin.
+                                data += chunk
+                            request_received.set()
                             peer.sendall(prefix)
                             for _ in range(100):
                                 peer.sendall(b'a')
-                                time.sleep(.015)
+                                if stop.wait(.015):
+                                    return
                     except OSError:
                         pass
                     finally:
@@ -127,43 +137,84 @@ class PublisherResponseBoundsTests(unittest.TestCase):
 
                 worker = threading.Thread(target=serve, daemon=True)
                 worker.start()
+                connection = http.client.HTTPConnection(*listener.getsockname(), timeout=.3)
                 connections = []
                 def factory(host, **kwargs):
-                    connection = http.client.HTTPConnection(*listener.getsockname(), timeout=.3)
                     connections.append(connection)
                     return connection
                 client = github.GitHubClient('SYNTHETIC-TOKEN', _connection_factory=factory)
-                started = time.monotonic()
                 try:
-                    with self.assertRaisesRegex(github.GitHubError, 'timeout'):
-                        client._request('GET', 'https://api.github.com/user', deadline_seconds=.15)
+                    connection.connect()
+                    self.assertTrue(accepted.wait(2))
+                    started = time.monotonic()
+                    with mock.patch('release_tools.github.ssl.create_default_context', return_value=context):
+                        with self.assertRaisesRegex(github.GitHubError, 'timeout'):
+                            client._request('GET', 'https://api.github.com/user', deadline_seconds=.15)
                     self.assertLess(time.monotonic() - started, .75)
+                    self.assertTrue(request_received.is_set())
                     self.assertIsNone(connections[0].sock)
                     self.assertTrue(closed.wait(2))
                 finally:
+                    stop.set()
+                    connection.close()
+                    for peer in peers:
+                        try:
+                            peer.shutdown(socket.SHUT_RDWR)
+                        except OSError:
+                            pass
+                    listener.close()
                     worker.join(2)
-                self.assertFalse(worker.is_alive())
+                    self.assertFalse(worker.is_alive())
 
-    def test_publisher_dns_failure_is_bounded_and_does_not_send_authorization(self):
-        release, finished = threading.Event(), threading.Event()
+    def test_actions_dns_failure_is_bounded_and_does_not_send_authorization(self):
+        # Loading the Windows trust store may itself exhaust the short request
+        # budget. Prepare it first so this test actually exercises stalled DNS.
+        context = ssl.create_default_context()
+        release, started, finished, returned = (threading.Event() for _ in range(4))
+        errors, elapsed = [], []
+
         def resolver(*_):
+            started.set()
             try:
-                release.wait(2)
+                if not release.wait(2):
+                    raise AssertionError("Fixture resolver was not released")
                 return []
             finally:
                 finished.set()
-        client = github.GitHubClient('SYNTHETIC-TOKEN')
-        try:
-            with mock.patch.object(socket, 'getaddrinfo', side_effect=resolver), \
-                    mock.patch.object(socket, 'socket') as sockets:
-                started = time.monotonic()
-                with self.assertRaisesRegex(github.GitHubError, 'timeout'):
-                    client._request('GET', 'https://api.github.com/user', deadline_seconds=.08)
-                self.assertLess(time.monotonic() - started, .5)
+
+        cancel = threading.Event()
+        client = github.GitHubClient('SYNTHETIC-TOKEN', cancel=cancel)
+
+        def request():
+            began = time.monotonic()
+            try:
+                client._request('GET', 'https://api.github.com/user', deadline_seconds=.08)
+            except BaseException as exc:
+                errors.append(exc)
+            finally:
+                elapsed.append(time.monotonic() - began)
+                returned.set()
+
+        worker = threading.Thread(target=request, daemon=True)
+        with mock.patch.object(github.ssl, 'create_default_context', return_value=context), \
+                mock.patch.object(socket, 'getaddrinfo', side_effect=resolver), \
+                mock.patch.object(socket, 'socket') as sockets:
+            try:
+                worker.start()
+                self.assertTrue(started.wait(1), "The stalled DNS resolver was not entered")
+                self.assertTrue(returned.wait(.5), "The request exceeded its bounded wait")
+                self.assertEqual(len(errors), 1)
+                self.assertIsInstance(errors[0], github.GitHubError)
+                self.assertRegex(str(errors[0]), 'timeout')
+                self.assertLess(elapsed[0], .5)
                 sockets.assert_not_called()
-        finally:
-            release.set()
-            self.assertTrue(finished.wait(2))
+            finally:
+                cancel.set()
+                release.set()
+                worker.join(2)
+                self.assertFalse(worker.is_alive())
+                if started.is_set():
+                    self.assertTrue(finished.wait(2))
 
 
 if __name__ == '__main__':

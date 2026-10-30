@@ -1,6 +1,6 @@
 # TG Proxy for Windows
 
-The version in preparation is **1.15.3**, for Windows 10/11 x64. A packaged
+Windows 10/11 x64 are supported. A packaged
 `TgWsProxy_windows.exe` runs without a separate Python installation.
 
 ## Connect Telegram
@@ -35,4 +35,4 @@ Use `--portable` or a `TgWsProxy_data` directory beside the executable for porta
 mode. Retain that whole directory when moving it. Standard mode uses per-user
 application storage.
 
-[Build from source](BuildFromSource.md) · [Project state](../PROJECT_STATE.md).
+[Build from source](BuildFromSource.md).

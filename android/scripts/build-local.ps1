@@ -43,14 +43,6 @@ $candidates = [Collections.Generic.List[string]]::new()
 if ($ToolRoot) {
     $candidates.Add([IO.Path]::GetFullPath($ToolRoot))
 } else {
-    # MSIX may redirect LocalAppData into Codex's physical LocalCache folder.
-    # Prefer this real path so the same command also works outside the app.
-    $packages = Join-Path $env:USERPROFILE 'AppData\Local\Packages'
-    if (Test-Path -LiteralPath $packages) {
-        foreach ($package in (Get-ChildItem -LiteralPath $packages -Directory -Filter 'OpenAI.Codex_*' | Sort-Object LastWriteTimeUtc -Descending)) {
-            $candidates.Add((Join-Path $package.FullName 'LocalCache\Local\TGProxyAndroidBuild'))
-        }
-    }
     if ($env:LOCALAPPDATA) { $candidates.Add((Join-Path $env:LOCALAPPDATA 'TGProxyAndroidBuild')) }
     $candidates.Add((Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'TGProxyAndroidBuild'))
     $candidates.Add((Join-Path $env:USERPROFILE 'AppData\Local\TGProxyAndroidBuild'))

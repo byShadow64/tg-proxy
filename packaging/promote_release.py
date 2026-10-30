@@ -16,7 +16,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from publisher.github import (  # noqa: E402
+from release_tools.github import (  # noqa: E402
     create_missing_tag_for_actions,
     download_draft_bundle,
     publish_github,

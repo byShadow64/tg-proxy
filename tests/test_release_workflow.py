@@ -35,7 +35,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("TgWsProxy-unsigned-publication-bundle", source)
         self.assertNotIn("promote_release.py", source)
 
-    def test_client_channel_identity_was_not_moved_by_publisher_work(self):
+    def test_client_channel_identity_is_unchanged_by_release_tools(self):
         source = (ROOT / "proxy/update_channel.py").read_text(encoding="utf-8")
         self.assertIn('UPDATE_MANIFEST_URL = "https://217.177.34.28/latest.json"', source)
 

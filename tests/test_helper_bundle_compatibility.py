@@ -3,8 +3,8 @@ import hashlib
 import unittest
 import zipfile
 
-from publisher.bundle import BundleError, load_bundle
-from tests.test_publisher_bundle import PreparedBundleMixin
+from release_tools.bundle import BundleError, load_bundle
+from tests.test_release_bundle import PreparedBundleMixin
 
 
 class HelperBundleCompatibilityTest(PreparedBundleMixin, unittest.TestCase):

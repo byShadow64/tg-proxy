@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Mapping
 
-from publisher.legacy import publication_core
+from release_tools import assets as core
 
 
 ASSET_NAMES = ("CHANGELOG.md", "SHA256SUMS.txt", "TgWsProxy_helper.zip", "TgWsProxy_windows.exe")
@@ -145,8 +145,8 @@ def _source_version(data):
 def load_bundle(path) -> ReleaseBundle:
     """Validate every byte; never unpack, import or run bundle source or EXE.
 
-    Integrity does not imply approval: publishers additionally require the
-    separately verified release approval from publisher.trust.
+    Integrity does not imply approval: release promotion additionally requires the
+    separately verified release approval from release_tools.trust.
     """
     try:
         supplied = Path(path).expanduser()
@@ -207,7 +207,6 @@ def load_bundle(path) -> ReleaseBundle:
         if (asset_root.is_symlink() or getattr(asset_root, "is_junction", lambda: False)()
                 or not asset_root.is_dir() or {p.name for p in asset_root.iterdir()} != set(ASSET_NAMES)):
             raise BundleError("asset_allowlist")
-        core = publication_core()
         assets = {name: asset_root / name for name in ASSET_NAMES}
         for name, file in assets.items():
             _regular(file, core.MAX_ASSET_BYTES[name])
@@ -296,97 +295,3 @@ def revalidate_bundle(bundle: ReleaseBundle) -> ReleaseBundle:
     if current.bundle_id != bundle.bundle_id:
         raise BundleError("bundle_changed")
     return current
-
-
-def export_bundle(bundle, approval, destination_zip):
-    """Copy only exact verified bytes plus approval into a new transport ZIP."""
-    import secrets
-    import shutil
-    from publisher.trust import load_approval
-    bundle = revalidate_bundle(bundle)
-    approval = load_approval(bundle, approval)
-    target = Path(destination_zip).expanduser()
-    if (target.suffix.lower() != ".zip" or target.exists() or target.is_symlink()
-            or target.resolve().is_relative_to(bundle.root)):
-        raise BundleError("export_target")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_name(".bundle." + secrets.token_hex(12) + ".tmp")
-    created = False
-    try:
-        with temporary.open("xb") as stream:
-            with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as archive:
-                entries = [(name, bundle.root / name) for name in ("manifest.json", "source.zip", "RELEASE_NOTES.md")]
-                entries += [("assets/" + name, bundle.assets[name]) for name in sorted(bundle.assets)]
-                for name, source_path in entries:
-                    info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
-                    info.create_system = 3
-                    info.external_attr = 0o100644 << 16
-                    info.compress_type = zipfile.ZIP_DEFLATED
-                    with source_path.open("rb") as source, archive.open(info, "w") as destination:
-                        shutil.copyfileobj(source, destination, 256 * 1024)
-                info = zipfile.ZipInfo("approval.json", date_time=(1980, 1, 1, 0, 0, 0))
-                info.create_system = 3
-                info.external_attr = 0o100644 << 16
-                info.compress_type = zipfile.ZIP_DEFLATED
-                archive.writestr(info, canonical_json(approval) + b"\n")
-        _verify_export_archive(temporary, bundle)
-        # Exclusive creation keeps a concurrent user file safe; there is no
-        # overwrite mode, even when exporting the exact same version again.
-        with target.open("xb") as output:
-            created = True
-            with temporary.open("rb") as source:
-                shutil.copyfileobj(source, output, 256 * 1024)
-        _verify_export_archive(target, bundle)
-        return target
-    except BaseException as error:
-        if created:
-            try:
-                target.unlink(missing_ok=True)
-            except OSError:
-                pass
-        if not isinstance(error, Exception) or hasattr(error, "code"):
-            raise
-        raise BundleError("export") from None
-    finally:
-        try:
-            temporary.unlink(missing_ok=True)
-        except OSError:
-            pass
-
-
-def _verify_export_archive(path, bundle):
-    """Bind copied transport bytes to approval, not to mutable source paths."""
-    from publisher.trust import verify_approval
-    expected = {"manifest.json": bundle.manifest_sha256,
-                "source.zip": bundle.manifest["source_zip_sha256"],
-                "RELEASE_NOTES.md": hashlib.sha256(bundle.notes.encode("utf-8")).hexdigest(),
-                **{"assets/" + name: digest for name, digest in bundle.manifest["assets"].items()}}
-    limits = {"manifest.json": MAX_MANIFEST, "source.zip": MAX_SOURCE_ZIP,
-              "RELEASE_NOTES.md": 32 * 1024, "approval.json": 32 * 1024,
-              **{"assets/" + name: size for name, size in bundle.asset_sizes.items()}}
-    try:
-        with zipfile.ZipFile(path) as archive:
-            names = archive.namelist()
-            if len(names) != 8 or set(names) != set(expected) | {"approval.json"}:
-                raise BundleError("export_content")
-            for name, expected_hash in expected.items():
-                entry = archive.getinfo(name)
-                if entry.file_size > limits[name]:
-                    raise BundleError("export_content")
-                digest, count = hashlib.sha256(), 0
-                with archive.open(entry) as source:
-                    while chunk := source.read(256 * 1024):
-                        count += len(chunk)
-                        if count > limits[name]:
-                            raise BundleError("export_content")
-                        digest.update(chunk)
-                if digest.hexdigest() != expected_hash:
-                    raise BundleError("export_content")
-            if archive.getinfo("approval.json").file_size > limits["approval.json"]:
-                raise BundleError("export_content")
-            approval = json.loads(archive.read("approval.json").decode("utf-8"), object_pairs_hook=_pairs)
-            verify_approval(bundle, approval)
-    except BundleError:
-        raise
-    except Exception:
-        raise BundleError("export_content") from None

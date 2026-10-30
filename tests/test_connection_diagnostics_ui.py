@@ -397,15 +397,22 @@ if _NATIVE_MODE:
                             rows = list(initial)
                             for completed, row in enumerate(rows, 1):
                                 emit(dict(kind="progress", result=row, completed=completed, total=103))
-                            first.wait(3)
+                            # These are explicit phases, not timed progression: a
+                            # busy native renderer must not skip the 100-result
+                            # phase merely because its worker wait expired.
+                            if not first.wait(10):
+                                raise AssertionError("Fixture's first phase was not released")
                             rows.append(result("cf", "error", "tls", dc=2))
                             emit(dict(kind="progress", result=rows[-1], completed=101, total=103))
-                            second.wait(3)
+                            if not second.wait(10):
+                                raise AssertionError("Fixture's second phase was not released")
                             rows.append(result("worker", dc=4))
                             emit(dict(kind="progress", result=rows[-1], completed=102, total=103))
-                            cancel.wait(3)
+                            if not cancel.wait(10):
+                                raise AssertionError("Fixture did not receive cancellation")
                             cleanup.set()
-                            finish.wait(3)
+                            if not finish.wait(10):
+                                raise AssertionError("Fixture cleanup phase was not released")
                             rows.append(result("helper", "cancelled", "cancelled"))
                             emit(dict(kind="progress", result=rows[-1], completed=103, total=103))
                             return report(rows, status="cancelled", recommendation="retry")

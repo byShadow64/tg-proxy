@@ -73,7 +73,10 @@ class ApplyUpdateTest(unittest.TestCase):
             'active': False, 'phase': 'idle', 'downloaded': 0, 'total': None, 'version': '',
         }))
         directory = stack.enter_context(tempfile.TemporaryDirectory())
-        self.exe = Path(directory) / 'renamed app.exe'
+        # Hosted Windows TEMP may be an 8.3 name or a junction. Use its
+        # canonical spelling so this ordinary-file fixture reaches the update
+        # behavior under test without weakening the production path guard.
+        self.exe = Path(directory).resolve() / 'renamed app.exe'
         self.exe.write_bytes(b'old')
         self.asset = {'url': 'https://example.invalid/new.exe',
                       'digest': 'sha256:' + hashlib.sha256(b'new').hexdigest()}

@@ -8,22 +8,18 @@ from contextlib import redirect_stderr, redirect_stdout
 import io
 import unittest
 
-from publisher.bundle import BundleError, load_bundle
-from tests.test_publisher_bundle import PreparedBundleMixin
+from release_tools.bundle import BundleError, load_bundle
+from tests.test_release_bundle import PreparedBundleMixin
 
 PATH = Path(__file__).resolve().parents[1] / "packaging/prepare_release.py"
-SPEC = importlib.util.spec_from_file_location("test_publisher_preparer", PATH)
+SPEC = importlib.util.spec_from_file_location("test_release_preparer", PATH)
 preparer = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = preparer
 SPEC.loader.exec_module(preparer)
-LOCAL_PATH = Path(__file__).resolve().parents[1] / "packaging/publish_local_updates.py"
-LOCAL_SPEC = importlib.util.spec_from_file_location("test_local_bundle_promoter", LOCAL_PATH)
-local_publisher = importlib.util.module_from_spec(LOCAL_SPEC)
-sys.modules[LOCAL_SPEC.name] = local_publisher
-LOCAL_SPEC.loader.exec_module(local_publisher)
 
 
-class PublisherPreparationTest(PreparedBundleMixin, unittest.TestCase):
+
+class ReleasePreparationTest(PreparedBundleMixin, unittest.TestCase):
     def setUp(self):
         self.prepare_fixture()
         self.checkout = self.folder / "checkout"
@@ -155,20 +151,3 @@ class PublisherPreparationTest(PreparedBundleMixin, unittest.TestCase):
             with self.assertRaises(ValueError):
                 preparer.create_bundle(self.executable, self.folder / "forbidden")
         self.assertFalse((self.folder / "forbidden").exists())
-
-    def test_local_cli_requires_bundle_and_cannot_fall_back_to_checkout_notes(self):
-        from publisher.profiles import ServerProfile
-        publish = Mock(return_value={"status": "published_and_verified"})
-        with patch("publisher.server.publish_bundle", publish), redirect_stderr(io.StringIO()):
-            with self.assertRaises(SystemExit) as caught:
-                local_publisher.main([])
-        self.assertEqual(2, caught.exception.code)
-        publish.assert_not_called()
-        profile = ServerProfile(host_key="SHA256:" + "a" * 43)
-        with patch("publisher.server.publish_bundle", publish), patch(
-                "publisher.profiles.load_default_profile", return_value=profile), patch.object(
-                local_publisher, "ROOT", self.checkout), redirect_stdout(io.StringIO()):
-            self.assertEqual(0, local_publisher.main(["--bundle", str(self.root)]))
-        chosen = publish.call_args.args[0]
-        self.assertEqual(self.sources["docs/RELEASE_NOTES.md"].decode(), chosen.notes)
-        self.assertEqual(self.root, chosen.root)

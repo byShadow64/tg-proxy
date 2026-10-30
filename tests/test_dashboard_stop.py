@@ -118,9 +118,22 @@ if _NATIVE_MODE:
             # keep all mapping and containment assertions in the tests below.
             deadline = time.monotonic() + timeout
             canvas = view.overview._parent_canvas
+
+            def requested_client_size():
+                # A hosted desktop may have a smaller WM maximum than the
+                # requested 1080x760 viewport. Read Tk's actual pixel bounds,
+                # not CTk's logical maxsize wrapper, and still require the
+                # exact size that this window manager permits.
+                scale = view.root._get_window_scaling()
+                minimum = tuple(map(int, view.root.tk.splitlist(
+                    view.root.tk.call("wm", "minsize", view.root._w))))
+                maximum = tuple(map(int, view.root.tk.splitlist(
+                    view.root.tk.call("wm", "maxsize", view.root._w))))
+                return tuple(max(low, min(round(value * scale), high))
+                             for value, low, high in zip(size, minimum, maximum))
+
             while not (view.root.winfo_ismapped() and view.updates.frame.winfo_ismapped()
-                       and view.root.winfo_width() == round(size[0] * view.root._get_window_scaling())
-                       and view.root.winfo_height() == round(size[1] * view.root._get_window_scaling())
+                       and (view.root.winfo_width(), view.root.winfo_height()) == requested_client_size()
                        and view.updates.frame.winfo_width() > 1
                        and view.updates.frame.winfo_height() > 1
                        and canvas.winfo_width() > 1 and canvas.winfo_height() > 1
@@ -297,6 +310,11 @@ if _NATIVE_MODE:
                         self.assertTrue(overlap_width <= 1 or overlap_height <= 1)
                         view.root.geometry("1080x760+12000+12000")
                         self.wait_layout(view, size=(1080, 760))
+                        for button in (view.stop_button, view.telegram_button):
+                            self.assertInside(button, view.overview._parent_canvas)
+                            self.assertInside(button._text_label, button)
+                        self.assertInside(view.endpoint.master, view.overview._parent_canvas)
+                        self.assertInside(view.updates.frame, view.root)
                         view.root.geometry("860x640+12000+12000")
                         self.wait_layout(view)
                         self.assertInside(view.endpoint.master, view.overview._parent_canvas)
