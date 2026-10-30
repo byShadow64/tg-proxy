@@ -1,0 +1,12 @@
+[Unit]
+Description=Keep TG Helper signed configuration fresh
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=240s
+RandomizedDelaySec=15s
+AccuracySec=1s
+Unit=tg-helper-registry-agent.service
+
+[Install]
+WantedBy=timers.target

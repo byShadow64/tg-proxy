@@ -1,0 +1,47 @@
+name: Problem report
+description: Report a reproducible problem in TG Proxy
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Remove passwords, tokens, keys, personal data and full proxy-secret links before posting."
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      placeholder: Windows 1.15.x or Android 0.1.x-dev
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options: [Windows, Android, Linux, macOS, Docker]
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: OS and device
+      description: Include OS version and phone model where relevant.
+    validations:
+      required: true
+  - type: dropdown
+    id: helper
+    attributes:
+      label: Helper
+      options: [Disabled, Registered client, Private Helper, Unsure]
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps, expected result and actual result
+      description: Include network type and whether another VPN is active.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized log excerpt
+      description: Copy only the relevant events; do not attach private profiles or credentials.
+      render: text

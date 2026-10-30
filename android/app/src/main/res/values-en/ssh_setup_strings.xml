@@ -1,0 +1,28 @@
+<resources>
+    <string name="ssh_setup_title">Install Helper through SSH</string>
+    <string name="ssh_setup_body">Ubuntu or Debian with root access. The wizard uploads Helper sources bundled with the app, installs the service and registers the server. Certificate verification needs free ports 80 and 443.</string>
+    <string name="ssh_port">SSH port</string>
+    <string name="ssh_user">Username</string>
+    <string name="ssh_probe_key">Check SSH key</string>
+    <string name="ssh_key_verification">Compare this SHA-256 fingerprint with the key in your VPS console. A password can be entered only after confirmation; a changed key is rejected.</string>
+    <string name="ssh_key_checked">I verified the server key</string>
+    <string name="ssh_confirm_key">Confirm key</string>
+    <string name="ssh_password">SSH password</string>
+    <string name="ssh_password_memory">The password stays in memory for this installation only and is not saved.</string>
+    <string name="ssh_registered_access">Allow any registered TG Proxy installation to connect</string>
+    <string name="ssh_allow_upgrade">Allow updating an existing Helper and enabling the selected access</string>
+    <string name="ssh_install">Install and register</string>
+    <string name="ssh_reset">Start again</string>
+    <string name="ssh_key_ready">Key received. Compare and confirm its fingerprint.</string>
+    <string name="ssh_invalid_input">Check the numeric IP, SSH port and username.</string>
+    <string name="ssh_root_required">A root account is required. This wizard does not use sudo.</string>
+    <string name="ssh_key_changed">The SSH key changed. No password was sent; verify the key again through the VPS console.</string>
+    <string name="ssh_failed">Helper installation could not be completed. Check SSH access and server status.</string>
+    <string name="ssh_cancelled">Cancelled. Server state has not been confirmed; check it before retrying.</string>
+    <string name="ssh_connecting">Connecting through verified SSH…</string>
+    <string name="ssh_uploading">Uploading Helper files…</string>
+    <string name="ssh_installing">Installing the Helper service and verifying its certificate…</string>
+    <string name="ssh_verifying">Verifying signed Helper settings and access…</string>
+    <string name="ssh_registry_unverified">The server reported installation, but the trust service has not confirmed its settings. Saved settings were preserved; check the server and retry connecting by IP.</string>
+    <string name="ssh_success">Helper installed, registered and verified.</string>
+</resources>

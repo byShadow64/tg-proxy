@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+/build-staging/
+/dist-staging/
+*.spec.bak
+venv/
+.venv/
+/.codegraph/
+/.omo/
+/TgWsProxy_data/
+/config.json
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.pfx
+*.p12
+
+# PyInstaller
+*.manifest
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+/icon.icns
+/TG Proxy.lnk

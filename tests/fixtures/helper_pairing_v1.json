@@ -1,0 +1,15 @@
+{
+  "description": "Synthetic public TGPAIR1 interoperability vector; never use these credentials.",
+  "code": "TG1.AAECAwQFBgc.EBESExQVFhcYGRobHB0eHw",
+  "id": "AAECAwQFBgc",
+  "key_hex": "3bec55e7ba0c1d9f58f3db0e34195c62a64e0c812212d28067739a392d0c3a0e",
+  "client_nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "server_nonce": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+  "certificate_sha256_hex": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+  "request_utf8": "{\"v\":1,\"id\":\"AAECAwQFBgc\",\"nonce\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"proof\":\"63ZCdOEqWNWECWXp9ZDJEvz9iihAtzRnwTfdw0519MU\"}",
+  "payload_base64url": "eyJ2IjoxLCJwb3J0Ijo4NDQ0LCJmaW5nZXJwcmludCI6IjQwNDE0MjQzNDQ0NTQ2NDc0ODQ5NGE0YjRjNGQ0ZTRmNTA1MTUyNTM1NDU1NTY1NzU4NTk1YTViNWM1ZDVlNWYiLCJ0b2tlbiI6InN5bnRoZXRpYy12ZWN0b3ItdG9rZW4tbm90LWEtcmVhbC1jcmVkZW50aWFsLTEyMzQ1NiJ9",
+  "client_proof_hex": "eb764274e12a58d5840965e9f590c912fcfd8a2840b73467c137ddc34e75f4c5",
+  "server_proof_hex": "1eb8fd1df0b1f3936341e6ea506e1d8e0ae09958dedf73bc95efa787bebaff83",
+  "payload_utf8": "{\"v\":1,\"port\":8444,\"fingerprint\":\"404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f\",\"token\":\"synthetic-vector-token-not-a-real-credential-123456\"}",
+  "response_utf8": "{\"v\":1,\"nonce\":\"ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8\",\"payload\":\"eyJ2IjoxLCJwb3J0Ijo4NDQ0LCJmaW5nZXJwcmludCI6IjQwNDE0MjQzNDQ0NTQ2NDc0ODQ5NGE0YjRjNGQ0ZTRmNTA1MTUyNTM1NDU1NTY1NzU4NTk1YTViNWM1ZDVlNWYiLCJ0b2tlbiI6InN5bnRoZXRpYy12ZWN0b3ItdG9rZW4tbm90LWEtcmVhbC1jcmVkZW50aWFsLTEyMzQ1NiJ9\",\"proof\":\"Hrj9HfCx85NjQebqUG4djgrgmVje33O8le-nh766_4M\"}"
+}

@@ -1,0 +1,140 @@
+{
+  "v": 1,
+  "files": [
+    {
+      "path": "LICENSE",
+      "size": 1116,
+      "sha256": "39d008038703b0dcda9f784b5143fba2b7f7312400c579c314ec30d0d290904d"
+    },
+    {
+      "path": "deploy_helper.sh",
+      "size": 18296,
+      "sha256": "1784f084176022b95776f9a4e1e612b0edba1cba6502000ef7037416d7240962"
+    },
+    {
+      "path": "deploy_helper_registry.sh",
+      "size": 26836,
+      "sha256": "3334c86f8facb08fea86c8b7482b2c09d7c7219424d3c558f7f0c9f1b8144a84"
+    },
+    {
+      "path": "helper_certbot_requirements.txt",
+      "size": 4654,
+      "sha256": "a63dd9f33e44174fe2ae53c30117db75e263854cff0c2077232c97b2e9ed4692"
+    },
+    {
+      "path": "helper_enrollment.py",
+      "size": 7659,
+      "sha256": "ad6b53ff0a9ee73ebface3232ea5a0854a78ec354394cdc40f39cc11c1c470d0"
+    },
+    {
+      "path": "helper_pairing.py",
+      "size": 11557,
+      "sha256": "a358996d3b05a622d0a026ec56372bef916a012a2861d92e17fe35369ecc611f"
+    },
+    {
+      "path": "helper_registry.py",
+      "size": 24680,
+      "sha256": "d7952ba142841ae036403d1147793f47069125d97af96b815ad57e705175044c"
+    },
+    {
+      "path": "helper_registry_agent.py",
+      "size": 14474,
+      "sha256": "a4480b3e7e3ad6235bbce6941259e96eb3ba2a19563042384a9aae8d9750e7b5"
+    },
+    {
+      "path": "helper_registry_renew.sh",
+      "size": 1251,
+      "sha256": "1b059b503d1800322ba21f0ba5bb2937dc210bc68ee99d5c550a187cfbd29a6c"
+    },
+    {
+      "path": "helper_registry_requirements.txt",
+      "size": 2248,
+      "sha256": "8b8bde593b94047a0485421a781c38c7b7a706d62b76986b1bb403e039a6d8ee"
+    },
+    {
+      "path": "helper_requirements.txt",
+      "size": 1133,
+      "sha256": "800d5df9ff8a3f7ac4579ee60bbad97a3d01b649ac3f6f99c22a2ad2e8500ab5"
+    },
+    {
+      "path": "helper_server.py",
+      "size": 24859,
+      "sha256": "6cae3922bd85b1a4807df29ceebeb93cbcdbf3bc57b0738db5ee11e622c93cad"
+    },
+    {
+      "path": "proxy/__init__.py",
+      "size": 274,
+      "sha256": "7e900fd3df32b4323645ec30a54c8811150fb08aa4b218f376d7ead8e6299e6d"
+    },
+    {
+      "path": "proxy/balancer.py",
+      "size": 1181,
+      "sha256": "3d4330488b968e146286b14790c0814eae3efe5d0f26206572369ca6368eed24"
+    },
+    {
+      "path": "proxy/config.py",
+      "size": 9172,
+      "sha256": "86d02e50833b22fb76d89bf592632b8dcb2ee954724004c3311caa202042e2e9"
+    },
+    {
+      "path": "proxy/http_transport.py",
+      "size": 5132,
+      "sha256": "15aac8b122c54f2ef47ea5dd6643a9100c6f5c1b67f5ecf72449d778d309cef4"
+    },
+    {
+      "path": "proxy/project.py",
+      "size": 315,
+      "sha256": "af8dd1db1c7e4061c497cbd2e51cea0d5659c8993e11accf4efd86a98b9f6eb7"
+    },
+    {
+      "path": "proxy/registry_helper.py",
+      "size": 8111,
+      "sha256": "f1327ebc88f9db3fa293c84be8e51a844611bd27403270aa582541a022e035c7"
+    },
+    {
+      "path": "proxy/registry_protocol.py",
+      "size": 11011,
+      "sha256": "357d0698133b130ff4009d6991e9d01cdae390fb366e185c9c58dd60ed598107"
+    },
+    {
+      "path": "proxy/route_policy.py",
+      "size": 2616,
+      "sha256": "645e38933ec78b8f464ce192ca742bd484f3294ae2f64d09be1175e4f0cbfa0d"
+    },
+    {
+      "path": "proxy/utils.py",
+      "size": 7946,
+      "sha256": "fd9036a0b0043efa3e9f2d30e70b91a83cc1c8139c2e08c39742f5c2c99580d0"
+    },
+    {
+      "path": "tg-helper-certbot-renew.service",
+      "size": 439,
+      "sha256": "56c166534710706229718f7d57f327a5df378ccb4c8ca35d9c469c2ebf8915c8"
+    },
+    {
+      "path": "tg-helper-certbot-renew.timer",
+      "size": 216,
+      "sha256": "7ed31b74adee9682d61d9624ecd9b490aae53ac29390da96e7ef94601a309338"
+    },
+    {
+      "path": "tg-helper-enroll.service",
+      "size": 849,
+      "sha256": "69a2c15bf8c9fecdf062c1f2ae4e161ca54a5da5fa344e58377c071ee930ed09"
+    },
+    {
+      "path": "tg-helper-registry-agent.service",
+      "size": 777,
+      "sha256": "5e642e6d0e5914c064f69be58233706e322d7147a0bc15d59f6e522be30e2752"
+    },
+    {
+      "path": "tg-helper-registry-agent.timer",
+      "size": 215,
+      "sha256": "9010c8bf94ee07255f6f01e6bd99213d297b0ffd47f4a790c882eaa9f4db2565"
+    },
+    {
+      "path": "tg-helper.service",
+      "size": 1172,
+      "sha256": "ca20822efedfc8b48e1d72dcf1baeca0b8945c8de624986170333165f293da4f"
+    }
+  ]
+}

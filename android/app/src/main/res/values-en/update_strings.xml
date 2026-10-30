@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="update_title">Updates</string>
+  <string name="update_intro">We check for new versions automatically once a day.</string>
+  <string name="update_checking">Checking for updates…</string>
+  <string name="update_current">Your version is up to date.</string>
+  <string name="update_available">Version %1$s is available</string>
+  <string name="update_downloading">Downloading: %1$d%%</string>
+  <string name="update_verifying">Verifying the file and app signature…</string>
+  <string name="update_ready">The update is downloaded and verified. Ready to install.</string>
+  <string name="update_installing">Passing the update to the Android installer…</string>
+  <string name="update_confirm">Confirm the installation in Android.</string>
+  <string name="update_network_error">Could not check or download the update. Try again later; the proxy keeps running.</string>
+  <string name="update_verification_error">The update failed verification. Installation is blocked.</string>
+  <string name="update_install_error">Installation was not completed. You can try again.</string>
+  <string name="update_notification_available">Open TG Proxy to download the update.</string>
+  <string name="update_size">%1$s of %2$s MB</string>
+  <string name="update_download">Download update</string>
+  <string name="update_install">Install update</string>
+  <string name="update_cancel">Cancel</string>
+  <string name="update_check">Check for updates</string>
+  <string name="update_install_note">Android will ask you to confirm installation. If needed, allow installs from TG Proxy and return here. There is no need to uninstall the app; your settings are kept. After installation, open TG Proxy and start the proxy.</string>
+  <string name="update_automatic">Check automatically</string>
+  <string name="update_wifi">Download automatically on unmetered Wi-Fi</string>
+    <string name="update_intro_manual">Automatic checks are off. Use the button below to check for a new version.</string>
+</resources>

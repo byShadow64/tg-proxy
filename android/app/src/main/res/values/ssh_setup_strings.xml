@@ -1,0 +1,28 @@
+<resources>
+    <string name="ssh_setup_title">Установка Helper по SSH</string>
+    <string name="ssh_setup_body">Ubuntu или Debian с доступом root. Мастер загрузит исходники Helper из приложения, установит службу и зарегистрирует сервер. Для проверки сертификата потребуются свободные порты 80 и 443.</string>
+    <string name="ssh_port">SSH-порт</string>
+    <string name="ssh_user">Логин</string>
+    <string name="ssh_probe_key">Проверить ключ SSH</string>
+    <string name="ssh_key_verification">Сверьте SHA-256 отпечаток с ключом в консоли вашего VPS. Пароль можно ввести только после подтверждения; при смене ключа подключение будет отклонено.</string>
+    <string name="ssh_key_checked">Я сверил ключ сервера</string>
+    <string name="ssh_confirm_key">Подтвердить ключ</string>
+    <string name="ssh_password">Пароль SSH</string>
+    <string name="ssh_password_memory">Пароль используется только в памяти для этой установки и не сохраняется.</string>
+    <string name="ssh_registered_access">Разрешить доступ любой зарегистрированной установке TG Proxy</string>
+    <string name="ssh_allow_upgrade">Разрешить обновление существующего Helper и включение выбранного доступа</string>
+    <string name="ssh_install">Установить и зарегистрировать</string>
+    <string name="ssh_reset">Начать заново</string>
+    <string name="ssh_key_ready">Ключ получен. Сверьте и подтвердите отпечаток.</string>
+    <string name="ssh_invalid_input">Проверьте числовой IP, SSH-порт и логин.</string>
+    <string name="ssh_root_required">Нужна учётная запись с правами root. Этот мастер не использует sudo.</string>
+    <string name="ssh_key_changed">Ключ SSH изменился. Пароль не передан; повторно сверьте ключ через консоль VPS.</string>
+    <string name="ssh_failed">Не удалось завершить установку Helper. Проверьте доступ SSH и состояние сервера.</string>
+    <string name="ssh_cancelled">Отменено. Состояние сервера не подтверждено; проверьте его перед повтором.</string>
+    <string name="ssh_connecting">Устанавливаем проверенное SSH-соединение…</string>
+    <string name="ssh_uploading">Загружаем файлы Helper…</string>
+    <string name="ssh_installing">Устанавливаем службу Helper и проверяем сертификат…</string>
+    <string name="ssh_verifying">Проверяем подписанные параметры и доступ к Helper…</string>
+    <string name="ssh_registry_unverified">Сервер сообщил об установке, но параметры ещё не подтверждены службой доверия. Настройки не заменены; проверьте сервер и повторите подключение по IP.</string>
+    <string name="ssh_success">Helper установлен, зарегистрирован и подтверждён.</string>
+</resources>

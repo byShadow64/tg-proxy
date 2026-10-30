@@ -1,0 +1,21 @@
+[Unit]
+Description=Refresh TG Helper registry authorization
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=tg-helper
+Group=tg-helper
+WorkingDirectory=/opt/tg-helper
+EnvironmentFile=/etc/tg-helper/registry-agent.env
+ExecStart=/opt/tg-helper/venv/bin/python /opt/tg-helper/helper_registry_agent.py --registry-url ${REGISTRY_URL} --registry-public-key /etc/tg-helper/registry-public.pem --private-key /var/lib/tg-helper/registry-agent.key --helper-id ${HELPER_ID} --tls-cert /etc/tg-helper/server.crt --output /var/lib/tg-helper/registry-config.json
+TimeoutStartSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tg-helper
+ReadOnlyPaths=/etc/tg-helper
+CapabilityBoundingSet=
+TasksMax=32

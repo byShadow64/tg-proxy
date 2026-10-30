@@ -1,0 +1,20 @@
+<resources>
+    <string name="registry_body">Enter the Helper IP. This app installation registers its own key and verifies signed server settings. No hardware identifiers are used.</string>
+    <string name="registry_ip">Helper IP address</string>
+    <string name="registry_connect">Connect by IP</string>
+    <string name="registry_cancel">Cancel connection</string>
+    <string name="registry_stop_first">Stop the proxy before choosing a different Helper.</string>
+    <string name="registry_managed">This installation is registered. Short-lived authorization refreshes for new connections; existing connections stay open.</string>
+    <string name="registry_manual">Manual settings and one-time code</string>
+    <string name="registry_use_manual">Use manual settings</string>
+    <string name="registry_setup">Set up the server through SSH</string>
+    <string name="service_registry_address">Enter a numeric IPv4 or IPv6 address only, without a port, hostname, scheme or path.</string>
+    <string name="service_registry_unknown">No owner-registered Helper was found at this IP. Prepare the server through SSH first.</string>
+    <string name="service_registry_denied">The trust service denied this installation. Contact the administrator.</string>
+    <string name="service_registry_rate_limited">Too many requests. Wait before trying again.</string>
+    <string name="service_registry_cancelled">Helper registration or connection cancelled.</string>
+    <string name="service_registry_timeout">The trust service did not respond in time. Check the network and retry.</string>
+    <string name="service_registry_failed">Helper access and server settings could not be verified. Saved settings were preserved.</string>
+    <string name="service_registry_success">Signed Helper settings verified and saved. You can start the proxy.</string>
+    <string name="event_relay_connected">A secure WebSocket transport through a relay route is connected.</string>
+</resources>

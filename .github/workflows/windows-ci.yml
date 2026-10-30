@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        python: ["3.11", "3.14"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Install project and build dependencies
+        run: python -m pip install ".[helper-server]" pytest
+      - name: Run tests
+        run: python -m pytest -q
+
+  android-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Verify Android core and pinned SSH dependencies
+        working-directory: android
+        run: bash ./gradlew --no-daemon --console=plain --max-workers=2 :core:test
+
+  build-windows:
+    needs: [tests, android-core]
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install project and build dependencies
+        run: python -m pip install ".[build,helper-server]"
+      - name: Build Windows executable
+        run: python -m PyInstaller packaging/windows.spec --noconfirm
+      - name: Check executable
+        run: if (!(Test-Path dist/TgWsProxy.exe)) { throw "dist/TgWsProxy.exe was not created" }
+      - name: Run packaged application with isolated settings
+        run: python packaging/verify_windows_exe.py --exe dist/TgWsProxy.exe
+      - name: Prepare public artifacts
+        run: python packaging/prepare_release.py --bundle-output dist/publication
+      - name: Verify unsigned bundle integrity without executing its source
+        run: python -c "from publisher.bundle import load_bundle; b = load_bundle('dist/publication'); print('Unsigned CI bundle:', b.version, b.bundle_id)"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: TgWsProxy-unsigned-publication-bundle
+          path: dist/publication/*
+          if-no-files-found: error
+          retention-days: 7

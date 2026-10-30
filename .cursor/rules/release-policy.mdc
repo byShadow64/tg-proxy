@@ -1,0 +1,21 @@
+---
+description: Publish only one verified immutable release bundle
+alwaysApply: true
+---
+
+# Release policy
+
+- Choose the completed authorized version from docs/PROJECT_STATE.md; WIP is not publishable.
+- Keep Staging and instrumented/private fixtures local. Never replace released bytes in place.
+- Run checks appropriate to the change, including ready EXE/APK and profile/update/rollback gates.
+- One Windows bundle contains source.zip, manifest, notes and four exact assets.
+- Preserve honest build/source provenance and SHA-256; a source-only migration needs new approval.
+- Default ancestry, successful CI of the exact source SHA and all workflow bytes must be verified.
+- The release workflow is manual, trusted-default and data-only. It never rebuilds the EXE.
+- Only trusted Actions may create a missing stable tag. No retag, clobber or parallel publisher.
+- Verify final downloads and each channel independently; draft/queued is not published.
+- Keep signing keys, passwords, tokens, private profiles and raw logs outside source/packages.
+- Server publication requires the same approved bundle and the current trusted SSH pin.
+- A different publisher target does not change existing clients' embedded update addresses.
+- Conflicts, unknown changes or missing rights stop the dependent publication without bypass.
+- Preserve previous immutable packages. Documentation-only edits need no version/build/release.

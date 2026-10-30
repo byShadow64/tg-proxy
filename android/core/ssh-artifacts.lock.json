@@ -1,0 +1,24 @@
+{
+  "v": 1,
+  "repository": "https://repo.maven.apache.org/maven2/",
+  "dependencies": [
+    {
+      "group": "com.github.mwiede",
+      "artifact": "jsch",
+      "version": "2.28.8",
+      "artifacts": {
+        "jsch-2.28.8.jar": "2afca1357d816028f2ac33f22407d2488a68406682973949cebb1b8ea6688a8b",
+        "jsch-2.28.8.pom": "b48f39cbc74e1e80ea7f9344e1e3b022b3f7c94fae349cfa8e2182c60ec4d7f5"
+      }
+    },
+    {
+      "group": "org.bouncycastle",
+      "artifact": "bcprov-jdk18on",
+      "version": "1.86",
+      "artifacts": {
+        "bcprov-jdk18on-1.86.jar": "2af190b300cbb0b35e248ccf5f4a06b6072030aeb3da7a98ec73abe5b4cb371f",
+        "bcprov-jdk18on-1.86.pom": "970b70cb75a184639b6fb9ba3c465aca6a4e1a5f3fff4d65ce8574b2fd79ef38"
+      }
+    }
+  ]
+}

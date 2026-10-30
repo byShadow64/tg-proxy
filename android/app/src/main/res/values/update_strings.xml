@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="update_title">Обновления</string>
+  <string name="update_intro">Проверяем новые версии автоматически раз в сутки.</string>
+  <string name="update_checking">Проверяем обновления…</string>
+  <string name="update_current">Установлена актуальная версия.</string>
+  <string name="update_available">Доступна версия %1$s</string>
+  <string name="update_downloading">Загрузка: %1$d%%</string>
+  <string name="update_verifying">Проверяем файл и подпись приложения…</string>
+  <string name="update_ready">Обновление загружено и проверено. Можно установить.</string>
+  <string name="update_installing">Передаём обновление установщику Android…</string>
+  <string name="update_confirm">Подтвердите установку в окне Android.</string>
+  <string name="update_network_error">Не удалось проверить или скачать обновление. Повторите позже; прокси продолжает работать.</string>
+  <string name="update_verification_error">Обновление не прошло проверку. Установка заблокирована.</string>
+  <string name="update_install_error">Установка не завершена. Можно попробовать ещё раз.</string>
+  <string name="update_notification_available">Откройте TG Proxy, чтобы скачать обновление.</string>
+  <string name="update_size">%1$s из %2$s МБ</string>
+  <string name="update_download">Скачать обновление</string>
+  <string name="update_install">Установить обновление</string>
+  <string name="update_cancel">Отменить</string>
+  <string name="update_check">Проверить обновления</string>
+  <string name="update_install_note">Android попросит подтвердить установку. Если нужно, разрешите установку из TG Proxy и вернитесь сюда. Приложение удалять не нужно — настройки сохранятся. После установки откройте TG Proxy и запустите прокси.</string>
+  <string name="update_automatic">Автоматически проверять</string>
+  <string name="update_wifi">Автозагрузка по безлимитному Wi-Fi</string>
+    <string name="update_intro_manual">Автопроверка выключена. Проверить новую версию можно кнопкой ниже.</string>
+</resources>

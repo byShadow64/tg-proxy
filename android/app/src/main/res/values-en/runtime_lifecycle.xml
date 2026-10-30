@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="enrollment_title">Connecting Helper</string>
+    <string name="enrollment_background">Continues in the background. Tap Cancel to cancel.</string>
+    <string name="event_handshake_length"> · Incomplete or oversized header. Check the proxy entry in Telegram.</string>
+    <string name="event_handshake_secret"> · Check the secret and protocol: an old 127.0.0.1 entry in Telegram may be stale. Connect this proxy again.</string>
+    <string name="event_handshake_zero_dc"> · The client did not specify a DC. Check the proxy entry in Telegram.</string>
+    <string name="event_handshake_reserved_dc"> · Unsupported client DC. Check the proxy entry in Telegram.</string>
+</resources>

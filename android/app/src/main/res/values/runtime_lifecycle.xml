@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="enrollment_title">Подключение Helper</string>
+    <string name="enrollment_background">Продолжается в фоне. Для отмены нажмите «Отмена».</string>
+    <string name="event_handshake_length"> · Неполный или слишком длинный заголовок. Проверьте запись прокси в Telegram.</string>
+    <string name="event_handshake_secret"> · Проверьте секрет и протокол: старая запись 127.0.0.1 в Telegram могла устареть. Подключите прокси заново.</string>
+    <string name="event_handshake_zero_dc"> · Клиент не указал DC. Проверьте запись прокси в Telegram.</string>
+    <string name="event_handshake_reserved_dc"> · Неподдерживаемый DC клиента. Проверьте запись прокси в Telegram.</string>
+</resources>

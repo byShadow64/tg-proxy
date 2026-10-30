@@ -1,0 +1,7 @@
+# Publisher verification only: CPython 3.14, Windows x64, ordinary GIL build.
+# Wheel SHA-256 values verified against https://pypi.org/pypi/<name>/<version>/json
+# No project installation, build backend, source distributions, or PyInstaller.
+cryptography==50.0.2 --hash=sha256:7afa5a6602a9f29af1f3a2965f831bae7c9d5d597b7cbb716d41ab3b7d89879c
+cffi==2.1.1 --hash=sha256:3222ba5d678f80a030e6afbcc33dc1ae5cb45facabb61cee2c7016b8432fde48
+pycparser==3.12 --hash=sha256:a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e
+pefile==2024.8.26 --hash=sha256:76f8b485dcd3b1bb8166f1128d395fa3d87af26360c2358fb75b80019b957c6f

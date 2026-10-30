@@ -1,0 +1,100 @@
+# TGPROXY_EXACT_BUNDLE_PUBLISHER_V1
+name: Publish approved release bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      draft_release_id:
+        description: Unpublished publisher-input draft ID
+        required: true
+        type: string
+      bundle_asset_id:
+        description: publication-bundle.zip asset ID in that draft
+        required: true
+        type: string
+      bundle_sha256:
+        description: SHA-256 of the exact signed publication-bundle.zip
+        required: true
+        type: string
+      tag:
+        description: Stable version tag, for example v1.15.3
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ${{ github.repository }}-stable-release-publication
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.repository == 'byShadow64/tg-proxy' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      # Only trusted default-branch code is checked out. Input ZIPs remain data.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - name: Install publisher verification dependencies only
+        run: >-
+          python -m pip install --only-binary=:all: --require-hashes -r packaging/publisher-requirements.lock
+      - name: Verify signed input, source commit, tag and trusted CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT_ID: ${{ inputs.draft_release_id }}
+          ASSET_ID: ${{ inputs.bundle_asset_id }}
+          BUNDLE_SHA: ${{ inputs.bundle_sha256 }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: >-
+          python -B packaging/promote_release.py
+          --repository "$env:GITHUB_REPOSITORY"
+          --draft-release-id "$env:DRAFT_ID"
+          --bundle-asset-id "$env:ASSET_ID"
+          --bundle-sha256 "$env:BUNDLE_SHA"
+          --tag "$env:RELEASE_TAG"
+          --output "$env:RUNNER_TEMP/publisher-verify"
+          --verify-only
+
+  publish:
+    needs: verify
+    if: github.repository == 'byShadow64/tg-proxy' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - name: Install publisher verification dependencies only
+        run: >-
+          python -m pip install --only-binary=:all: --require-hashes -r packaging/publisher-requirements.lock
+      - name: Reverify and publish the exact approved assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT_ID: ${{ inputs.draft_release_id }}
+          ASSET_ID: ${{ inputs.bundle_asset_id }}
+          BUNDLE_SHA: ${{ inputs.bundle_sha256 }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: >-
+          python -B packaging/promote_release.py
+          --repository "$env:GITHUB_REPOSITORY"
+          --draft-release-id "$env:DRAFT_ID"
+          --bundle-asset-id "$env:ASSET_ID"
+          --bundle-sha256 "$env:BUNDLE_SHA"
+          --tag "$env:RELEASE_TAG"
+          --output "$env:RUNNER_TEMP/publisher-release"
+          --publish --create-missing-tag

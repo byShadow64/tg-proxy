@@ -1,0 +1,13 @@
+[Unit]
+Description=Renew owner-enabled TG Helper IP certificate
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/tg-helper/registry-agent.env
+ExecStart=/opt/tg-helper/venv/bin/certbot renew --cert-name ${REGISTRY_CERT_NAME} --deploy-hook /opt/tg-helper/helper_registry_renew.sh --non-interactive --no-random-sleep-on-renew
+TimeoutStartSec=180
+PrivateTmp=true
+ProtectHome=true
+UMask=0077

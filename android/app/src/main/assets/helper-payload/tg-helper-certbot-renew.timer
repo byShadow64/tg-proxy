@@ -1,0 +1,12 @@
+[Unit]
+Description=Check the short-lived TG Helper IP certificate
+
+[Timer]
+OnBootSec=1h
+OnUnitActiveSec=6h
+RandomizedDelaySec=15m
+AccuracySec=1m
+Unit=tg-helper-certbot-renew.service
+
+[Install]
+WantedBy=timers.target

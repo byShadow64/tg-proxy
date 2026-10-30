@@ -1,0 +1,20 @@
+<resources>
+    <string name="registry_body">Введите IP Helper. Эта установка приложения зарегистрируется с собственным ключом, затем проверит подписанные параметры сервера. Идентификаторы оборудования не используются.</string>
+    <string name="registry_ip">IP-адрес Helper</string>
+    <string name="registry_connect">Подключить по IP</string>
+    <string name="registry_cancel">Отменить подключение</string>
+    <string name="registry_stop_first">Чтобы выбрать другой Helper, сначала остановите прокси.</string>
+    <string name="registry_managed">Доступ этой установки подтверждён. Краткосрочное разрешение обновляется для новых соединений; текущие соединения не перезапускаются.</string>
+    <string name="registry_manual">Ручные настройки и одноразовый код</string>
+    <string name="registry_use_manual">Перейти к ручной настройке</string>
+    <string name="registry_setup">Настроить сервер по SSH</string>
+    <string name="service_registry_address">Введите только числовой IPv4 или IPv6 адрес, без порта, имени, схемы и пути.</string>
+    <string name="service_registry_unknown">Helper с таким IP не зарегистрирован владельцем. Сначала подготовьте сервер по SSH.</string>
+    <string name="service_registry_denied">Служба доверия отклонила доступ этой установки. Обратитесь к администратору.</string>
+    <string name="service_registry_rate_limited">Слишком много запросов. Подождите перед повторной проверкой.</string>
+    <string name="service_registry_cancelled">Регистрация или подключение Helper отменены.</string>
+    <string name="service_registry_timeout">Служба доверия не ответила вовремя. Проверьте сеть и повторите.</string>
+    <string name="service_registry_failed">Не удалось подтвердить доступ и параметры Helper. Настройки не заменены.</string>
+    <string name="service_registry_success">Подписанные параметры Helper проверены и сохранены. Можно запускать прокси.</string>
+    <string name="event_relay_connected">Защищённый WebSocket-транспорт через промежуточный маршрут установлен.</string>
+</resources>

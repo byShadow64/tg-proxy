@@ -1,0 +1,11 @@
+# Default owners
+* @byShadow64
+
+# Automation and repository settings
+.github/** @byShadow64
+
+# Documentation
+docs/** @byShadow64
+
+# Core proxy implementation
+proxy/** @byShadow64

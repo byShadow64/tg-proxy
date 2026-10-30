@@ -1,0 +1,24 @@
+name: Feature request
+description: Suggest an improvement to TG Proxy
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would this improve?
+      description: Describe the problem and the behavior you would find useful.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options: [All platforms, Windows, Android, Linux, macOS, Docker]
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Add relevant examples without credentials or personal data.

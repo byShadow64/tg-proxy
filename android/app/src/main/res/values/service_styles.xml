@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.TGProxy" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowBackground">#0C1414</item>
+    </style>
+</resources>

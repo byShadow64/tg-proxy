@@ -1,0 +1,19 @@
+---
+description: Use normal authorization and bounded GitHub operations
+alwaysApply: true
+---
+
+# GitHub operations
+
+- Repository identity is byShadow64/tg-proxy. Preserve upstream attribution and licenses.
+- Do not import old private Git refs/history or move existing tags.
+- Use connected tools or normal Git/Desktop authorization; never extract another tool's secrets.
+- Keep changes reviewable and preserve unrelated work. No force push or protection bypass.
+- Use bounded pagination, checkpoints and conditional requests where supported.
+- Respect Retry-After/Reset and secondary backoff; do not rotate tokens/IPs to evade limits.
+- Related mutations are sequential, at least one second apart in a series.
+- After uncertain POST/dispatch, inspect remote state before retrying.
+- Read access and404 do not establish write permission or the reason for an account restriction.
+- Wiki, Pages and source docs are different surfaces; do not claim deployment from a docs edit.
+- Access/security/domain settings require an explicit owner instruction.
+- Public download/release-page links are prohibited; follow docs/GITHUB_CONTENT_POLICY.md.

@@ -1,0 +1,26 @@
+[Unit]
+Description=Owner-enabled TG Helper HTTPS IP enrollment proof
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tg-helper
+Group=tg-helper
+WorkingDirectory=/opt/tg-helper
+EnvironmentFile=/etc/tg-helper/registry-agent.env
+ExecStart=/opt/tg-helper/venv/bin/python /opt/tg-helper/helper_enrollment.py --ip ${PUBLIC_IP} --port 8444 --private-key /var/lib/tg-helper/registry-agent.key --tls-cert /etc/tg-helper/server.crt --https-cert /etc/tg-helper/enrollment.crt --https-key /etc/tg-helper/enrollment.key
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/tg-helper /var/lib/tg-helper
+TasksMax=32
+
+[Install]
+WantedBy=multi-user.target
