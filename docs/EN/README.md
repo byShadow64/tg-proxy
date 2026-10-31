@@ -1,10 +1,19 @@
+<div align="center">
+
+<img src="../../ui/assets/byshadow64.png" width="104" height="104" alt="">
+
 # TG Proxy
 
 [Русский](../../README.md) · [Documentation](../README.md) · [Changelog](../../CHANGELOG.md)
 
-A local MTProto proxy for Telegram on Windows and Android. It runs on your
-device, opens Telegram with a connection link and supports an optional Helper
-server. You do not need your own server to get started.
+**A local MTProto proxy for Telegram on Windows and Android.**
+
+It runs on your device, opens Telegram with a connection link and supports an optional Helper server.<br>
+You do not need your own server to get started.
+
+</div>
+
+---
 
 - **Windows 10/11 x64:** dashboard, system tray, startup at login and portable mode.
 - **Android 8.0+:** a local proxy, background operation and a notification Stop action.
@@ -18,11 +27,11 @@ server. You do not need your own server to get started.
    **Copy link** lets you open the link yourself.
 3. Keep TG Proxy running while Telegram uses this connection.
 
-The address `127.0.0.1` belongs to this device. Another phone or computer needs
-its own running copy. Open the current link again after changing the port.
-Disable this proxy in Telegram before stopping TG Proxy.
+> The address `127.0.0.1` belongs to this device. Another phone or computer needs
+> its own running copy. Open the current link again after changing the port.
+> Disable this proxy in Telegram before stopping TG Proxy.
 
-[Windows guide](README.windows.md) · [Android guide](../../android/README.md)
+**[Windows guide](README.windows.md)** · **[Android guide](../../android/README.md)**
 
 ## Helper
 
@@ -34,10 +43,10 @@ On Android, open **Routes**, enter the IP and tap **Connect by IP**. If the serv
 is not configured, the app offers SSH setup. You need the VPS owner's access
 and must confirm the server's SSH host key.
 
-IP-only connection requires the owner to enable access for registered clients.
-Entering an address does not make an existing private Helper public.
+> IP-only connection requires the owner to enable access for registered clients.
+> Entering an address does not make an existing private Helper public.
 
-[Helper guide](../RU/Helper.md) · [SSH setup](../SSH_SETUP.md)
+**[Helper guide](../RU/Helper.md)** · **[SSH setup](../SSH_SETUP.md)**
 
 ## How it works
 
@@ -54,9 +63,9 @@ route candidate does not necessarily mean that the whole connection has failed.
 The desktop source requires Python 3.11+. Android is built separately with
 Gradle. The packaged Windows EXE does not require Python.
 
-[Build Windows](BuildFromSource.md) ·
-[Build Android](../../android/BUILDING.md) ·
-[Contributing](CONTRIBUTING.md)
+**[Build Windows](BuildFromSource.md)** ·
+**[Build Android](../../android/BUILDING.md)** ·
+**[Contributing](CONTRIBUTING.md)**
 
 ## Credits and license
 
