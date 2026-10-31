@@ -225,6 +225,41 @@ class PromoteReleaseTest(unittest.TestCase):
         self.download_draft_bundle.assert_not_called()
         self.publish_github.assert_not_called()
 
+    def test_fetch_only_outputs_safe_id_without_extracting_or_mutating(self):
+        output_file=self.runner/"step-output";output_file.write_text("")
+        with patch.dict(os.environ,{"GITHUB_OUTPUT":str(output_file)}), \
+                patch.object(promote,"download_draft_archive",return_value="b"*64) as fetch, \
+                patch.object(promote,"load_local_bundle_archive") as local:
+            code,report=self.run_cli(self.args("--fetch-only"))
+        self.assertEqual((code,report["status"]),(0,"fetched"))
+        self.assertEqual(output_file.read_text(),"bundle_id="+"b"*64+"\n")
+        self.assertEqual(fetch.call_args.args[-1],self.output/"publication-bundle.zip")
+        local.assert_not_called();self.download_draft_bundle.assert_not_called()
+        self.verify_workflow_bundle.assert_not_called();self.create_missing_tag_for_actions.assert_not_called();self.publish_github.assert_not_called()
+
+    def test_fetch_rejects_output_injection(self):
+        output_file=self.runner/"step-output";output_file.write_text("")
+        with patch.dict(os.environ,{"GITHUB_OUTPUT":str(output_file)}),patch.object(promote,"download_draft_archive",return_value="b"*64+"\nsecret=bad"):
+            code,report=self.run_cli(self.args("--fetch-only"))
+        self.assertEqual((code,report["code"]),(1,"invalid_workflow_input"))
+        self.assertEqual(output_file.read_text(),"");self.publish_github.assert_not_called()
+
+    def test_verify_and_publish_use_local_archive_and_revalidate_each_time(self):
+        archive=self.runner/"downloaded.zip"
+        for mode in ("--verify-only","--publish"):
+            with self.subTest(mode=mode),patch.object(promote,"load_local_bundle_archive",return_value=self.bundle) as local:
+                code,report=self.run_cli(self.args(mode)+["--input-archive",str(archive),"--input-bundle-id","b"*64])
+                self.assertEqual(code,0)
+                local.assert_called_once_with(archive,"c"*64,"b"*64,self.output)
+        self.download_draft_bundle.assert_not_called()
+
+    def test_bad_local_archive_stops_before_verification_or_mutations(self):
+        from release_tools.github import GitHubError
+        with patch.object(promote,"load_local_bundle_archive",side_effect=GitHubError("draft_input_hash")):
+            code,report=self.run_cli(self.args("--publish")+["--input-archive",str(self.runner/"bad.zip"),"--input-bundle-id","b"*64])
+        self.assertEqual((code,report["code"]),(1,"draft_input_hash"))
+        self.verify_workflow_bundle.assert_not_called();self.create_missing_tag_for_actions.assert_not_called();self.publish_github.assert_not_called()
+
     def test_verify_only_cannot_enable_tag_creation(self):
         code, report = self.run_cli(self.args("--verify-only", "--create-missing-tag"))
         self.assertEqual((code, report["code"]), (1, "arguments"))

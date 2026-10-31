@@ -18,8 +18,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from release_tools.github import (  # noqa: E402
+    GitHubError,
+    InputEndpoint,
     create_missing_tag_for_actions,
     download_draft_bundle,
+    download_draft_archive,
+    load_local_bundle_archive,
     publish_github,
     trusted_actions_client,
     verify_workflow_bundle,
@@ -90,9 +94,12 @@ def _parser():
     parser.add_argument("--output", type=Path, required=True,
                         help="New isolated directory inside RUNNER_TEMP")
     mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--fetch-only", action="store_true")
     mode.add_argument("--verify-only", action="store_true")
     mode.add_argument("--publish", action="store_true")
     parser.add_argument("--create-missing-tag", action="store_true")
+    parser.add_argument("--input-archive", type=Path)
+    parser.add_argument("--input-bundle-id")
     return parser
 
 
@@ -143,7 +150,10 @@ def _validate_inputs(args):
             or args.repository.endswith(("/.", "/.."))
             or _TAG.fullmatch(args.tag) is None
             or _DIGEST.fullmatch(args.bundle_sha256) is None
-            or (args.create_missing_tag and not args.publish)):
+            or (args.create_missing_tag and not args.publish)
+            or (bool(args.input_archive) != bool(args.input_bundle_id))
+            or (args.input_bundle_id is not None and _DIGEST.fullmatch(args.input_bundle_id) is None)
+            or (args.fetch_only and args.input_archive is not None)):
         raise PromotionError("arguments")
     return token, _isolated_output(args.output)
 
@@ -164,6 +174,11 @@ def _safe_failure(exc, stage):
         if type(code) is not str or code not in _SAFE_ERROR_CODES:
             code = "publisher_failure"
         result["code"] = code
+        # Only the exact internal enum is reportable; no endpoint URL or
+        # exception-provided string is copied into workflow diagnostics.
+        endpoint = getattr(exc, "input_endpoint", None)
+        if stage is _FailureStage.DOWNLOAD_INPUT and isinstance(exc, GitHubError) and type(endpoint) is InputEndpoint:
+            result["input_endpoint"] = endpoint.value
         http_status = getattr(exc, "http_status", None)
         if type(http_status) is int and 100 <= http_status <= 599:
             result["http_status"] = http_status
@@ -183,10 +198,29 @@ def main(argv=None):
         token, output = _validate_inputs(args)
         client = trusted_actions_client(args.repository, token)
         stage = _FailureStage.DOWNLOAD_INPUT
-        bundle = download_draft_bundle(
-            args.repository, token, args.draft_release_id, args.bundle_asset_id,
-            args.bundle_sha256, output, _client=client,
-        )
+        if args.fetch_only:
+            output.mkdir(parents=True)
+            bundle_id = download_draft_archive(
+                args.repository, token, args.draft_release_id, args.bundle_asset_id,
+                args.bundle_sha256, output / "publication-bundle.zip", _client=client)
+            if type(bundle_id) is not str or _DIGEST.fullmatch(bundle_id) is None:
+                raise PromotionError("invalid_workflow_input")
+            github_output = os.environ.get("GITHUB_OUTPUT", "")
+            if not github_output or Path(github_output).is_symlink():
+                raise PromotionError("invalid_workflow_input")
+            with Path(github_output).open("a", encoding="utf-8", newline="\n") as destination:
+                destination.write("bundle_id=" + bundle_id + "\n")
+            print(json.dumps({"status": "fetched", "bundle_id": bundle_id,
+                              "sha256": args.bundle_sha256, "published": False}, sort_keys=True))
+            return 0
+        if args.input_archive is not None:
+            bundle = load_local_bundle_archive(args.input_archive, args.bundle_sha256,
+                                               args.input_bundle_id, output)
+        else:
+            bundle = download_draft_bundle(
+                args.repository, token, args.draft_release_id, args.bundle_asset_id,
+                args.bundle_sha256, output, _client=client,
+            )
         stage = _FailureStage.VERIFY_INPUT
         if args.tag != "v" + bundle.version:
             raise PromotionError("tag_mismatch")

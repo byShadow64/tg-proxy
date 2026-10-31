@@ -152,8 +152,10 @@ class RegistryServiceTest(unittest.TestCase):
         raw = p.public_key_der(self.device.public_key())
         # Populate the actual production bound without 10,000 filesystem commits.
         with self.store._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             db.executemany("INSERT INTO devices VALUES(?,?,1,?,?)",
                            ((format(index, "064x"), raw, 1000, 1000) for index in range(10000)))
+            db.commit()
         with self.assertRaisesRegex(p.RegistryError, "rate_limited"):
             self.store.register(self.device.public_key(), 1900)
         identifier = self.store.register(self.device.public_key(), 1901)
