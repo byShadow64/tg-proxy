@@ -18,6 +18,7 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketException
 
 /** Real foreground-service commands and local sockets only; no upstream requests. */
 @RunWith(AndroidJUnit4::class)
@@ -52,6 +53,13 @@ class ReconnectInstrumentedTest {
             fun listenerReleased(port: Int) {
                 ServerSocket().use { it.reuseAddress = true; it.bind(InetSocketAddress(loopback, port)) }
             }
+            fun assertPeerClosed(socket: Socket, message: String) {
+                try { assertEquals(message, -1, socket.getInputStream().read()) }
+                catch (_: SocketException) {
+                    // Closing an unfinished handshake may deliver either FIN or RST.
+                    // SocketTimeoutException is deliberately not accepted here.
+                }
+            }
             fun noServiceOrNotification(): Boolean {
                 @Suppress("DEPRECATION")
                 val services = context.getSystemService(ActivityManager::class.java).getRunningServices(Int.MAX_VALUE)
@@ -77,7 +85,7 @@ class ReconnectInstrumentedTest {
                     waitUntil { AppRuntime.state.value.metrics.activeConnections > 0 }
                     reconnect()
                     // Waiting for the old socket to close avoids accepting the pre-command RUNNING state.
-                    assertEquals("Reconnect must close the previous pending handshake", -1, pending.getInputStream().read())
+                    assertPeerClosed(pending, "Reconnect must close the previous pending handshake")
                     waitUntil { AppRuntime.state.value.status == ProxyStatus.RUNNING }
                 }
                 assertEquals(firstPort, AppRuntime.state.value.runningPort)
@@ -99,7 +107,7 @@ class ReconnectInstrumentedTest {
                         ContextCompat.startForegroundService(activity,
                             Intent(activity, ProxyService::class.java).setAction(ProxyService.ACTION_RECONNECT))
                     }
-                    assertEquals("Stop must close the pending local connection", -1, pending.getInputStream().read())
+                    assertPeerClosed(pending, "Stop must close the pending local connection")
                     waitUntil { AppRuntime.state.value.status == ProxyStatus.STOPPED && noServiceOrNotification() }
                 }
                 assertNull(AppRuntime.telegramUri())
