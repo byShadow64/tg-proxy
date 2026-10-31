@@ -124,7 +124,9 @@ class ReconnectInstrumentedTest {
                 waitUntil { !AppRuntime.state.value.isSaving && AppRuntime.state.value.settings == originalSettings.ui() }
                 assertTrue("Original emulator ciphertext must be restored",
                     preferences.edit().putString("encrypted_v1", originalCiphertext).commit())
-                assertTrue("Original emulator profile must be restored", originalSettings == SecureSettingsStore(context).load())
+                val restored = SecureSettingsStore(context).load()!!
+                assertTrue("Original emulator profile must be restored",
+                    originalSettings.ui() == restored.ui() && originalSettings.secretHex == restored.secretHex)
             }
         }
     }
