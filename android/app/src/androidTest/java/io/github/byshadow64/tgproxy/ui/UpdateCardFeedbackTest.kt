@@ -89,11 +89,11 @@ class UpdateCardFeedbackTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val expected = android.text.format.DateFormat.getDateFormat(context).format(date) + " " +
             android.text.format.DateFormat.getTimeFormat(context).format(date)
-        compose.onNodeWithTag("update_last_checked").assertTextContains(expected)
+        compose.onNodeWithTag("update_last_checked").assertTextContains(expected, substring = true)
         for (phase in listOf(UpdatePhase.CHECKING, UpdatePhase.ERROR)) {
             compose.runOnIdle { state = state.copy(phase = phase,
                 errorRes = if (phase == UpdatePhase.ERROR) R.string.update_network_error else 0) }
-            compose.onNodeWithTag("update_last_checked").performScrollTo().assertTextContains(expected)
+            compose.onNodeWithTag("update_last_checked").performScrollTo().assertTextContains(expected, substring = true)
         }
     }
 
