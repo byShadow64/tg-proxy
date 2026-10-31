@@ -34,7 +34,9 @@ jobs:
       - name: Install project and build dependencies
         run: python -m pip install ".[helper-server]" "pytest==9.2.0"
       - name: Run tests
-        run: python -m pytest -q -o faulthandler_timeout=120 -o faulthandler_exit_on_timeout=true
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: python -m pytest -v -o faulthandler_timeout=120 -o faulthandler_exit_on_timeout=true
 
   android-core:
     runs-on: ubuntu-latest

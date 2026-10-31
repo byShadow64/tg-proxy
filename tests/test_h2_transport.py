@@ -110,15 +110,24 @@ class H2WireTest(unittest.IsolatedAsyncioTestCase):
                                            timeout=httpx.Timeout(2, read=1))
 
     async def asyncTearDown(self):
-        for task in self.tasks:
-            task.cancel()
-        await asyncio.gather(*self.tasks, return_exceptions=True)
-        await self.lane.close()
-        self.server.close()
-        await self.server.wait_closed()
-        for connection in self.connections:
-            connection.writer.close()
-        await asyncio.wait_for(asyncio.gather(*self.handlers), 3)
+        # Close the resource before cancelling its infinite test producers.
+        # On older asyncio a cancellation/completion race can otherwise leave
+        # a producer waiting for a consumer which teardown already cancelled.
+        try:
+            await asyncio.wait_for(self.lane.close(), 3)
+        finally:
+            for task in self.tasks:
+                task.cancel()
+            self.server.close()
+            for connection in self.connections:
+                connection.writer.close()
+            try:
+                await asyncio.wait_for(asyncio.gather(*self.tasks, return_exceptions=True), 3)
+            finally:
+                await asyncio.wait_for(self.server.wait_closed(), 3)
+                await asyncio.wait_for(asyncio.gather(*self.handlers), 3)
+        self.assertTrue(all(task.done() for task in self.tasks))
+        self.assertTrue(all(task.done() for task in self.handlers))
 
     async def serve(self, reader, writer):
         self.handlers.append(asyncio.current_task())
@@ -817,6 +826,86 @@ class H2WireTest(unittest.IsolatedAsyncioTestCase):
             self.respond(original, b'o' * 40)
             self.assertEqual(await asyncio.wait_for(channel.receive(), .5), b'o' * 40)
             self.assertEqual(channel.replay_rotations, 0)
+
+    async def test_native_bridge_cancellation_at_ready_capacity_closes_without_client_eof(self):
+        secret = os.urandom(16)
+        handlers, native_writers, channels = [], [], []
+        armed, cancel_scheduled = False, asyncio.Event()
+        active_before = tg_ws_proxy.stats.connections_active
+
+        async def open_channel(dc, label):
+            channel = _HttpChannel(self.lane, 1, label)
+            channels.append(channel)
+            condition_wait_for = channel.capacity.wait_for
+
+            async def completed_capacity(predicate):
+                result = await condition_wait_for(predicate)
+                if armed and not cancel_scheduled.is_set():
+                    cancel_scheduled.set()
+                    # Queue external cancellation at the actual completed
+                    # Condition boundary, without replacing wait_for itself.
+                    asyncio.get_running_loop().call_soon(handlers[0].cancel)
+                return result
+
+            channel.capacity.wait_for = completed_capacity
+            return channel
+
+        def accept(reader, writer):
+            native_writers.append(writer)
+            task = asyncio.create_task(tg_ws_proxy._handle_client(reader, writer, secret))
+            handlers.append(task)
+            self.tasks.append(task)
+
+        raw = bytearray(os.urandom(64))
+        raw[0] = 0x42
+        raw[56:62] = PROTO_TAG_INTERMEDIATE + struct.pack('<h', -2)
+        keys = bytes(raw[8:56])
+        up = Cipher(algorithms.AES(hashlib.sha256(keys[:32] + secret).digest()),
+                    modes.CTR(keys[32:])).encryptor()
+        reverse = keys[::-1]
+        down = Cipher(algorithms.AES(hashlib.sha256(reverse[:32] + secret).digest()),
+                      modes.CTR(reverse[32:])).encryptor()
+        encrypted = up.update(bytes(raw))
+        init = bytes(raw[:56]) + encrypted[56:]
+        listener = await asyncio.start_server(accept, '127.0.0.1', 0)
+        client_writer = None
+        try:
+            with patch.object(tg_ws_proxy, 'cf_h2_pool', SimpleNamespace(open=AsyncMock(side_effect=open_channel))), \
+                    patch.object(tg_ws_proxy.ws_pool, 'get', AsyncMock(return_value=None)), \
+                    patch.multiple(proxy_config, fallback_cfproxy=True, cfproxy_worker_domains=[],
+                                   force_test_dc=False, fake_tls_domain='', proxy_protocol=False):
+                client_reader, client_writer = await asyncio.open_connection(
+                    '127.0.0.1', listener.sockets[0].getsockname()[1])
+                warmup = b'samekey!' + b'w' * 32
+                client_writer.write(init + up.update(struct.pack('<I', len(warmup)) + warmup))
+                await client_writer.drain()
+                request = await asyncio.wait_for(self.requests.get(), 1)
+                self.assertEqual(request[2], warmup)
+                self.respond(request, b'r' * 40)
+                self.assertEqual(down.update(await asyncio.wait_for(client_reader.readexactly(44), 1)),
+                                 struct.pack('<I', 40) + b'r' * 40)
+                armed = True
+                body = b'samekey!' + b'q' * 32
+                client_writer.write(up.update(struct.pack('<I', len(body)) + body))
+                await client_writer.drain()
+                self.assertEqual(await asyncio.wait_for(client_reader.read(1), 1), b'')
+                await asyncio.wait_for(asyncio.gather(*handlers), 1)
+                self.assertTrue(cancel_scheduled.is_set())
+                self.assertTrue(all(writer.is_closing() for writer in native_writers))
+                self.assertTrue(channels[0].close_done)
+                self.assertFalse(channels[0].pending)
+                self.assertEqual((self.lane.inflight, self.lane.queued_bytes, self.lane.reply_buffer_bytes), (0, 0, 0))
+                self.assertEqual(tg_ws_proxy.stats.connections_active, active_before)
+                self.assertEqual(len(self.connections), 1)
+        finally:
+            # Only failure cleanup disconnects the owned client; success above
+            # requires the real native owner to close it without client EOF.
+            if client_writer is not None:
+                client_writer.close()
+                await asyncio.wait_for(client_writer.wait_closed(), 1)
+            listener.close()
+            await asyncio.wait_for(listener.wait_closed(), 1)
+            await asyncio.wait_for(asyncio.gather(*handlers), 2)
 
     async def test_busy_channel_recovers_old_request_despite_newer_replies(self):
         channel = _HttpChannel(self.lane, 1, 'busy-recovery-test')

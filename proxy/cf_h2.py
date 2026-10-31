@@ -383,8 +383,10 @@ class _HttpChannel:
                 return False
             if not replay:
                 self.upload_wait_phase = 'channel-capacity'
-                await asyncio.wait_for(self.capacity.wait_for(lambda: self.closed or self._has_capacity(len(body))),
-                                       REQUEST_TIMEOUT)
+                # Keep cancellation in this task when capacity becomes ready.
+                # Python 3.11 wait_for can lose it at child-task completion.
+                async with asyncio.timeout(REQUEST_TIMEOUT):
+                    await self.capacity.wait_for(lambda: self.closed or self._has_capacity(len(body)))
         if self.closed:
             raise ConnectionError('H2 channel closed')
         if not replay:
@@ -664,8 +666,8 @@ class _HttpLane:
             if not wait and not self._has_capacity(length):
                 return False
             if wait:
-                await asyncio.wait_for(self.capacity.wait_for(lambda: self.closed or self._has_capacity(length)),
-                                       REQUEST_TIMEOUT)
+                async with asyncio.timeout(REQUEST_TIMEOUT):
+                    await self.capacity.wait_for(lambda: self.closed or self._has_capacity(length))
             if self.closed:
                 raise ConnectionError('H2 lane closed')
             self.inflight += 1
