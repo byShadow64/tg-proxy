@@ -22,5 +22,7 @@
   <string name="update_install_note">Android попросит подтвердить установку. Если нужно, разрешите установку из TG Proxy и вернитесь сюда. Приложение удалять не нужно — настройки сохранятся. После установки откройте TG Proxy и запустите прокси.</string>
   <string name="update_automatic">Автоматически проверять</string>
   <string name="update_wifi">Автозагрузка по безлимитному Wi-Fi</string>
+  <string name="update_last_checked">Последняя успешная проверка: %1$s</string>
+  <string name="update_not_checked">Успешных проверок пока нет.</string>
     <string name="update_intro_manual">Автопроверка выключена. Проверить новую версию можно кнопкой ниже.</string>
 </resources>

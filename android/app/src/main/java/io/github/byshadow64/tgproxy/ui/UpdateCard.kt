@@ -3,15 +3,23 @@ package io.github.byshadow64.tgproxy.ui
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import io.github.byshadow64.tgproxy.R
 import io.github.byshadow64.tgproxy.UpdatePhase
 import io.github.byshadow64.tgproxy.UpdateUiState
 import java.util.Locale
+import java.util.Date
+import java.util.TimeZone
 
 @Composable
 internal fun UpdateCard(state: UpdateUiState, actions: TgProxyActions, settings: Boolean = false) {
@@ -32,6 +40,14 @@ internal fun UpdateCard(state: UpdateUiState, actions: TgProxyActions, settings:
                 UpdatePhase.ERROR -> stringResource(if (state.errorRes != 0) state.errorRes else R.string.update_network_error)
             }
             Text(text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("update_status"))
+            // A failed or cancelled Android installation retains the verified APK
+            // and returns to READY so it can be retried. Keep its outcome visible
+            // separately; READY describes the file, not installation success.
+            if (state.errorRes != 0 && state.phase != UpdatePhase.ERROR) {
+                Text(stringResource(state.errorRes), style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.testTag("update_error").semantics { liveRegion = LiveRegionMode.Polite })
+            }
             if (state.phase == UpdatePhase.DOWNLOADING) {
                 LinearProgressIndicator(progress = { if (state.total > 0) (state.bytes.toFloat() / state.total).coerceIn(0f, 1f) else 0f }, modifier = Modifier.fillMaxWidth())
                 Text(stringResource(R.string.update_size, String.format(Locale.getDefault(), "%.1f", state.bytes / 1048576.0),
@@ -55,6 +71,21 @@ internal fun UpdateCard(state: UpdateUiState, actions: TgProxyActions, settings:
                 }
             }
             if (settings) {
+                val context = LocalContext.current
+                val locale = LocalConfiguration.current.locales[0]
+                val is24Hour = android.text.format.DateFormat.is24HourFormat(context)
+                val timezone = TimeZone.getDefault().id
+                val checkedAt = remember(state.lastChecked, context, locale, is24Hour, timezone) {
+                    if (state.lastChecked > 0) {
+                        val date = Date(state.lastChecked)
+                        android.text.format.DateFormat.getDateFormat(context).format(date) + " " +
+                            android.text.format.DateFormat.getTimeFormat(context).format(date)
+                    } else null
+                }
+                Text(if (checkedAt == null) stringResource(R.string.update_not_checked)
+                    else stringResource(R.string.update_last_checked, checkedAt),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag("update_last_checked"))
                 Text(stringResource(R.string.update_install_note), style = MaterialTheme.typography.bodySmall)
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.update_automatic), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)

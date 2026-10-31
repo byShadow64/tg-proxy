@@ -23,6 +23,9 @@ class ProxyService : Service() {
     private val generation = AtomicInteger()
     private val engine = AtomicReference<ProxyEngine?>(null)
     private var ticker: Job? = null
+    // onStartCommand and completion below run on Main. Ignored/duplicate commands
+    // still advance Android's startId and must not keep an already stopped service alive.
+    private var latestStartId = 0
     private val wakePolicy = NetworkWakePolicy(SystemClock::elapsedRealtime)
     private var networkWakeLock: PowerManager.WakeLock? = null
     private var wakeRenewedAt = 0L
@@ -34,7 +37,9 @@ class ProxyService : Service() {
             NotificationChannel(CHANNEL, getString(R.string.service_channel), NotificationManager.IMPORTANCE_LOW))
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        latestStartId = startId
         val action = intent?.action
+        val reconnectSettings = if (action == ACTION_RECONNECT) AppRuntime.runningSettings() else null
         // Every foreground start must be promoted promptly, even if its queued
         // request became obsolete before Android delivered it to this service.
         if (action != ACTION_STOP) {
@@ -44,8 +49,12 @@ class ProxyService : Service() {
                 else startForeground(NOTIFICATION, notification(message))
             } catch (_: Exception) { AppRuntime.failure(null); stopSelf(startId); return START_NOT_STICKY }
         }
-        if (action !in setOf(ACTION_START, ACTION_RESTART, ACTION_STOP) || (action != ACTION_STOP && !AppRuntime.canStart())) {
-            if (engine.get() == null) { stopForeground(STOP_FOREGROUND_REMOVE); stopSelfResult(startId) }
+        if (action !in setOf(ACTION_START, ACTION_RESTART, ACTION_RECONNECT, ACTION_STOP) ||
+            (action != ACTION_STOP && !AppRuntime.canStart()) || (action == ACTION_RECONNECT && reconnectSettings == null)) {
+            // Obsolete commands must not stop an earlier, still queued start.
+            if (engine.get() == null && (generation.get() == 0 || AppRuntime.state.value.status !in setOf(ProxyStatus.STARTING, ProxyStatus.STOPPING))) {
+                stopForeground(STOP_FOREGROUND_REMOVE); stopSelfResult(startId)
+            }
             return START_NOT_STICKY
         }
         if (action == ACTION_START && engine.get() != null && AppRuntime.state.value.status == ProxyStatus.RUNNING) return START_NOT_STICKY
@@ -60,7 +69,7 @@ class ProxyService : Service() {
                 withContext(Dispatchers.Main.immediate) { if (run == generation.get()) {
                     AppRuntime.stopped()
                     AppRuntime.append(io.github.byshadow64.tgproxy.ui.LogLevel.INFO, getString(R.string.event_stopped))
-                    stopForeground(STOP_FOREGROUND_REMOVE); stopSelfResult(startId)
+                    stopForeground(STOP_FOREGROUND_REMOVE); stopSelfResult(latestStartId)
                 } }
             } }
             return START_NOT_STICKY
@@ -70,7 +79,7 @@ class ProxyService : Service() {
             try {
                 if (run != generation.get()) return@withLock
                 stopEngine()
-                val settings = AppRuntime.settings()
+                val settings = reconnectSettings ?: AppRuntime.settings()
                 if (run != generation.get()) return@withLock
                 val listener: (EngineEvent) -> Unit = { event -> if (run == generation.get()) {
                     if (event.code == EventCode.CONNECTION_OPENED) wakePolicy.connectionOpened(event.activeConnections)
@@ -104,7 +113,7 @@ class ProxyService : Service() {
                 stopEngine()
                 withContext(Dispatchers.Main.immediate) { if (run == generation.get()) {
                     AppRuntime.failure((e as? EngineException)?.code)
-                    stopForeground(STOP_FOREGROUND_REMOVE); stopSelfResult(startId)
+                    stopForeground(STOP_FOREGROUND_REMOVE); stopSelfResult(latestStartId)
                 } }
             }
         } }
@@ -167,6 +176,7 @@ class ProxyService : Service() {
     companion object {
         const val ACTION_START = "io.github.byshadow64.tgproxy.START"
         const val ACTION_RESTART = "io.github.byshadow64.tgproxy.RESTART"
+        const val ACTION_RECONNECT = "io.github.byshadow64.tgproxy.RECONNECT"
         const val ACTION_STOP = "io.github.byshadow64.tgproxy.STOP"
         private const val CHANNEL = "tgproxy.connection"
         private const val NOTIFICATION = 1
