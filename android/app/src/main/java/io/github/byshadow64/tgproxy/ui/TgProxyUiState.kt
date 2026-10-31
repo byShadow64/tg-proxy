@@ -66,6 +66,9 @@ data class JournalEntry(
     val message: String,
 )
 
+/** Short-lived action feedback, separate from the persistent proxy failure. */
+data class UiFeedback(val id: Long, val message: String)
+
 object SettingsFields {
     const val LOCAL_PORT = "localPort"
     const val HELPER_HOST = "helperHost"
@@ -87,6 +90,8 @@ data class TgProxyUiState(
     val journal: List<JournalEntry> = emptyList(),
     val validationErrors: Map<String, String> = emptyMap(),
     val statusMessage: String? = null,
+    val feedback: UiFeedback? = null,
+    val connection: io.github.byshadow64.tgproxy.ConnectionAvailability = io.github.byshadow64.tgproxy.ConnectionAvailability.UNKNOWN,
     val hasSavedSettings: Boolean = false,
     val isSaving: Boolean = false,
     val pairingStatus: PairingStatus = PairingStatus.IDLE,
@@ -99,12 +104,14 @@ data class TgProxyUiState(
 )
 
 data class TgProxyActions(
+    val onFeedbackConsumed: (Long) -> Unit = {},
     val onCheckUpdate: () -> Unit = {},
     val onDownloadUpdate: () -> Unit = {},
     val onInstallUpdate: () -> Unit = {},
     val onCancelUpdate: () -> Unit = {},
     val onUpdateOptions: (Boolean, Boolean) -> Unit = { _, _ -> },
     val onStart: () -> Unit = {},
+    val onReconnect: () -> Unit = {},
     val onStop: () -> Unit = {},
     val onOpenTelegram: () -> Unit = {},
     val onCopyTelegramLink: () -> Unit = {},

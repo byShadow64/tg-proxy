@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="connection_offline_body">Нет подключения к сети. Включите Wi-Fi или мобильный интернет. Прокси можно оставить запущенным.</string>
+    <string name="connection_reconnect">Переподключить</string>
+</resources>

@@ -22,5 +22,7 @@
   <string name="update_install_note">Android will ask you to confirm installation. If needed, allow installs from TG Proxy and return here. There is no need to uninstall the app; your settings are kept. After installation, open TG Proxy and start the proxy.</string>
   <string name="update_automatic">Check automatically</string>
   <string name="update_wifi">Download automatically on unmetered Wi-Fi</string>
+  <string name="update_last_checked">Last successful check: %1$s</string>
+  <string name="update_not_checked">No successful checks yet.</string>
     <string name="update_intro_manual">Automatic checks are off. Use the button below to check for a new version.</string>
 </resources>

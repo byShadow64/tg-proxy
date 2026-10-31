@@ -28,7 +28,7 @@
     <string name="help_routes_body">Helper is an additional server for reaching Telegram. If everything works, you do not need it. If you have a prepared Helper, open Routes, enter its IP, and tap Connect. The app retrieves the remaining settings.</string>
     <string name="help_routes_button">Open routes</string>
     <string name="help_logs_title">No connection or slow loading</string>
-    <string name="help_logs_body">First, check that TG Proxy is running. Tap Open in Telegram again to select the current connection. If that does not help, compare Wi-Fi and mobile data. If a VPN is active, try without it when possible.</string>
+    <string name="help_logs_body">First, check that TG Proxy is running. Tap Open in Telegram again to select the current connection. If it does not recover after a network change, tap Reconnect in Overview — the port and link stay the same. If that does not help, compare Wi-Fi and mobile data. If a VPN is active, try without it when possible.</string>
     <string name="help_journal_button">Open journal</string>
     <string name="link_open">Connect by link</string>
     <string name="link_title">Connect by link</string>

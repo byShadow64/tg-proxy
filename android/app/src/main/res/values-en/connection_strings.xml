@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="connection_offline_body">No network connection. Turn on Wi-Fi or mobile data. You can leave the proxy running.</string>
+    <string name="connection_reconnect">Reconnect</string>
+</resources>

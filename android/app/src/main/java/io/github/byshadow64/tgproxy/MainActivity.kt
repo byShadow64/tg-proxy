@@ -28,6 +28,7 @@ import io.github.byshadow64.tgproxy.ui.HelperIpLink
 import io.github.byshadow64.tgproxy.ui.ProxyLinkParser
 
 class MainActivity : ComponentActivity() {
+    private val connectionMonitor by lazy { ConnectionMonitor(this) }
     private var pendingForegroundAction: (() -> Unit)? = null
     private var updatesRequest by mutableStateOf(0)
     private var incomingHelperLink by mutableStateOf<HelperIpLink?>(null)
@@ -45,17 +46,23 @@ class MainActivity : ComponentActivity() {
         acceptHelperLink(intent)
         setContent {
             val updateState = UpdateManager.state.collectAsStateWithLifecycle().value
+            val connection = connectionMonitor.state.collectAsStateWithLifecycle().value
             androidx.compose.runtime.LaunchedEffect(updateState.phase) {
                 if (updateState.phase == UpdatePhase.CONFIRM && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) openUpdateInstaller()
             }
-            val state = AppRuntime.state.collectAsStateWithLifecycle().value.copy(incomingHelperLink = incomingHelperLink, update = updateState)
+            val state = AppRuntime.state.collectAsStateWithLifecycle().value.copy(incomingHelperLink = incomingHelperLink, update = updateState, connection = connection)
             TgProxyApp(state, TgProxyActions(
+                onFeedbackConsumed = { AppRuntime.consumeFeedback(it) },
                 onCheckUpdate = { UpdateManager.check() },
                 onDownloadUpdate = { UpdateManager.download() },
                 onCancelUpdate = { UpdateManager.cancel() },
                 onInstallUpdate = { openUpdateInstaller() },
                 onUpdateOptions = { auto, wifi -> UpdateManager.options(auto, wifi) },
                 onStart = { requestStart(ProxyService.ACTION_START) },
+                onReconnect = {
+                    if (AppRuntime.state.value.status == io.github.byshadow64.tgproxy.ui.ProxyStatus.RUNNING)
+                        requestStart(ProxyService.ACTION_RECONNECT)
+                },
                 onStop = { launchService(ProxyService.ACTION_STOP) },
                 onOpenTelegram = { openTelegram() },
                 onCopyTelegramLink = { copyTelegramLink() },
@@ -103,6 +110,14 @@ class MainActivity : ComponentActivity() {
             updatesRequest++
             request.removeExtra("show_updates")
         }
+    }
+    override fun onStart() {
+        super.onStart()
+        connectionMonitor.start()
+    }
+    override fun onStop() {
+        connectionMonitor.stop()
+        super.onStop()
     }
     private fun openUpdateInstaller() {
         if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return

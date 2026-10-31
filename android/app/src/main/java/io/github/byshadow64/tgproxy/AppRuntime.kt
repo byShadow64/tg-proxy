@@ -24,6 +24,7 @@ object AppRuntime {
     private val ready = CompletableDeferred<Unit>()
     private val saveMutex = Mutex()
     private val ids = AtomicLong()
+    private val feedbackIds = AtomicLong()
     private lateinit var context: Context
     private lateinit var store: SecureSettingsStore
     @Volatile private var saved: AppSettings? = null
@@ -206,7 +207,13 @@ object AppRuntime {
     suspend fun settings(): AppSettings { ready.await(); return saved ?: throw StoreException() }
     fun setStatus(status: ProxyStatus, message: String? = null) { mutable.update { it.copy(status = status,
         statusMessage = message, runningPort = if (status == ProxyStatus.RUNNING) it.runningPort else null) } }
-    fun showMessage(id: Int) { mutable.update { it.copy(statusMessage = text(id)) } }
+    fun showMessage(id: Int) {
+        val feedback = UiFeedback(feedbackIds.incrementAndGet(), text(id))
+        mutable.update { it.copy(feedback = feedback) }
+    }
+    fun consumeFeedback(id: Long) {
+        mutable.update { if (it.feedback?.id == id) it.copy(feedback = null) else it }
+    }
     fun running(settings: AppSettings) { applied = settings; mutable.update { it.copy(status = ProxyStatus.RUNNING,
         statusMessage = null, runningPort = settings.port) } }
     fun stopped() { applied = null; mutable.update { it.copy(status = ProxyStatus.STOPPED, statusMessage = null,
@@ -290,13 +297,15 @@ object AppRuntime {
                             "pin" -> R.string.service_validation_pin
                             else -> R.string.service_validation_token
                         }) }
-                        mutable.update { it.copy(validationErrors = errors, statusMessage = text(R.string.service_validation_failed)) }
+                        mutable.update { it.copy(validationErrors = errors) }
+                        showMessage(R.string.service_validation_failed)
                         return@withLock
                     }
                     store.save(validation.settings)
                     saved = validation.settings
-                    mutable.update { it.copy(settings = validation.settings.ui(), validationErrors = emptyMap(), hasSavedSettings = true,
-                        statusMessage = text(if (it.status == ProxyStatus.RUNNING) R.string.service_saved_restart else R.string.service_saved)) }
+                    mutable.update { it.copy(settings = validation.settings.ui(), validationErrors = emptyMap(), hasSavedSettings = true) }
+                    showMessage(if (onRestart == null && mutable.value.status == ProxyStatus.RUNNING)
+                        R.string.service_saved_restart else R.string.service_saved)
                     append(LogLevel.INFO, text(R.string.service_saved))
                     persisted = true
                 }
@@ -510,6 +519,8 @@ object AppRuntime {
     }
     fun canStart(): Boolean = mutable.value.let { !it.isSaving && it.pairingStatus != PairingStatus.CONNECTING &&
         it.sshSetup.phase !in setOf(SshSetupPhase.PROBING, SshSetupPhase.DEPLOYING, SshSetupPhase.VERIFYING) }
+    /** Reconnect the current listener without applying a different saved profile. */
+    internal fun runningSettings(): AppSettings? = applied?.takeIf { mutable.value.status == ProxyStatus.RUNNING }
     fun telegramUri(web: Boolean = false): Uri? {
         val s = applied ?: return null
         if (mutable.value.status != ProxyStatus.RUNNING) return null

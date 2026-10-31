@@ -46,6 +46,8 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -56,6 +58,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -91,6 +94,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.byshadow64.tgproxy.R
 import io.github.byshadow64.tgproxy.BuildConfig
+import io.github.byshadow64.tgproxy.ConnectionAvailability
 import io.github.byshadow64.tgproxy.ui.theme.TgProxyTheme
 import java.text.NumberFormat
 
@@ -99,6 +103,18 @@ import java.text.NumberFormat
 fun TgProxyApp(state: TgProxyUiState, actions: TgProxyActions, updatesRequest: Int = 0) {
     TgProxyTheme {
         var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+        val feedbackHost = remember { SnackbarHostState() }
+        val latestActions by rememberUpdatedState(actions)
+        LaunchedEffect(state.feedback?.id) {
+            val feedback = state.feedback ?: return@LaunchedEffect
+            try {
+                feedbackHost.showSnackbar(feedback.message, withDismissAction = true)
+            } finally {
+                // A new message may already have replaced this one. The runtime
+                // consumes by ID so a cancelled/rotated UI cannot clear its successor.
+                latestActions.onFeedbackConsumed(feedback.id)
+            }
+        }
         LaunchedEffect(updatesRequest) { if (updatesRequest > 0) selectedTab = 3 }
         // The draft contains a token: it must stay out of rememberSaveable and Bundle state.
         var draft by remember { mutableStateOf(state.settings.copy()) }
@@ -141,6 +157,7 @@ fun TgProxyApp(state: TgProxyUiState, actions: TgProxyActions, updatesRequest: I
             modifier = Modifier.fillMaxSize().testTag("app_root"),
             containerColor = MaterialTheme.colorScheme.background,
             topBar = { AppHeader() },
+            snackbarHost = { SnackbarHost(feedbackHost, Modifier.testTag("action_feedback")) },
             bottomBar = {
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     labels.forEachIndexed { index, label ->
@@ -453,6 +470,9 @@ private fun Overview(state: TgProxyUiState, actions: TgProxyActions, modifier: M
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item { StatusHero(state) }
+        if (state.connection == ConnectionAvailability.OFFLINE) {
+            item(key = "offline_notice") { Notice(stringResource(R.string.connection_offline_body), false) }
+        }
         if (state.update.phase in setOf(io.github.byshadow64.tgproxy.UpdatePhase.AVAILABLE,
             io.github.byshadow64.tgproxy.UpdatePhase.DOWNLOADING, io.github.byshadow64.tgproxy.UpdatePhase.VERIFYING,
             io.github.byshadow64.tgproxy.UpdatePhase.READY, io.github.byshadow64.tgproxy.UpdatePhase.INSTALLING,
@@ -484,7 +504,7 @@ private fun Overview(state: TgProxyUiState, actions: TgProxyActions, modifier: M
             }
         }
         state.statusMessage?.let { message -> item { Notice(message, state.status == ProxyStatus.ERROR) } }
-        item { TelegramConnectionCard(running, actions) }
+        item { TelegramConnectionCard(running, !busy, actions) }
         item {
             Column(Modifier.testTag("session_metrics"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 AppCard {
@@ -518,7 +538,7 @@ private fun Overview(state: TgProxyUiState, actions: TgProxyActions, modifier: M
 }
 
 @Composable
-private fun TelegramConnectionCard(running: Boolean, actions: TgProxyActions) {
+private fun TelegramConnectionCard(running: Boolean, canReconnect: Boolean, actions: TgProxyActions) {
     AppCard {
         CardHeading(AppIcon.TELEGRAM, stringResource(R.string.ui_telegram_title))
         BodyText(stringResource(R.string.ui_telegram_body))
@@ -541,6 +561,12 @@ private fun TelegramConnectionCard(running: Boolean, actions: TgProxyActions) {
             Glyph(AppIcon.COPY, Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text(stringResource(R.string.ui_copy_telegram_link))
+        }
+        if (running) {
+            TextButton(onClick = actions.onReconnect, enabled = canReconnect,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("reconnect_proxy")) {
+                Text(stringResource(R.string.connection_reconnect))
+            }
         }
         if (!running) {
             Spacer(Modifier.height(8.dp))
