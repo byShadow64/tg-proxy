@@ -4,8 +4,8 @@
 # http://msdn.microsoft.com/en-us/library/ms646997.aspx
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 15, 3, 0),
-    prodvers=(1, 15, 3, 0),
+    filevers=(1, 15, 4, 0),
+    prodvers=(1, 15, 4, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -21,12 +21,12 @@ VSVersionInfo(
           [
             StringStruct(u'CompanyName', u'byShadow64'),
             StringStruct(u'FileDescription', u'TG Proxy - Windows Dashboard and TLS Helper'),
-            StringStruct(u'FileVersion', u'1.15.3.0'),
+            StringStruct(u'FileVersion', u'1.15.4.0'),
             StringStruct(u'InternalName', u'TgWsProxy'),
             StringStruct(u'LegalCopyright', u'Copyright (c) 2026 Flowseal and byShadow64. MIT License.'),
             StringStruct(u'OriginalFilename', u'TgWsProxy.exe'),
             StringStruct(u'ProductName', u'TG WS Proxy'),
-            StringStruct(u'ProductVersion', u'1.15.3.0'),
+            StringStruct(u'ProductVersion', u'1.15.4.0'),
           ]
         )
       ]

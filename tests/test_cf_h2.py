@@ -139,6 +139,89 @@ class HttpMultiplexTest(unittest.IsolatedAsyncioTestCase):
             return await result if inspect.isawaitable(result) else result
         self.lane.client = httpx.AsyncClient(http2=True, transport=httpx.MockTransport(handle))
 
+    async def _assert_cancel_at_ready_capacity(self, condition, operation):
+        target = None
+
+        async def complete_then_cancel(predicate):
+            self.assertTrue(predicate())
+            ready = asyncio.get_running_loop().create_future()
+            # Complete the condition and request cancellation in the same
+            # event-loop turn. Python 3.11 wait_for must not consume the latter
+            # merely because its separately scheduled condition has completed.
+            loop = asyncio.get_running_loop()
+            loop.call_soon(ready.set_result, True)
+            loop.call_soon(target.cancel)
+            return await ready
+
+        with patch.object(condition, 'wait_for', side_effect=complete_then_cancel):
+            target = asyncio.create_task(operation)
+            try:
+                done, _ = await asyncio.wait((target,), timeout=1)
+                self.assertIn(target, done, 'capacity cancellation did not finish')
+                self.assertTrue(target.cancelled(), 'capacity wait consumed cancellation')
+            finally:
+                target.cancel()
+                done, _ = await asyncio.wait((target,), timeout=1)
+                self.assertIn(target, done, 'cancelled test operation still owns work')
+
+    async def test_ready_channel_capacity_does_not_consume_external_cancellation(self):
+        async def handler(request):
+            await asyncio.Event().wait()
+
+        self._transport(handler)
+        channel = self._channel()
+        try:
+            await self._assert_cancel_at_ready_capacity(
+                channel.capacity, channel.send(b'k' * 40, False))
+        finally:
+            await channel.close()
+            self.assertFalse(channel.pending)
+            self.assertEqual((channel.pending_bytes, self.lane.inflight,
+                              self.lane.queued_bytes), (0, 0, 0))
+
+    async def test_ready_lane_capacity_does_not_consume_external_cancellation(self):
+        try:
+            await self._assert_cancel_at_ready_capacity(
+                self.lane.capacity, self.lane._reserve(40))
+        finally:
+            if self.lane.inflight:
+                await self.lane._release(40)
+            self.assertEqual((self.lane.inflight, self.lane.queued_bytes), (0, 0))
+
+    async def test_blocked_channel_and_lane_capacity_keep_the_request_timeout(self):
+        self._transport(lambda request: self.fail('capacity timeout reached HTTP'))
+        channel = self._channel()
+        for limit in ('MAX_CHANNEL_REQUESTS', 'MAX_LANE_REQUESTS'):
+            with self.subTest(limit=limit):
+                with patch('proxy.cf_h2.' + limit, 0), \
+                        patch('proxy.cf_h2.REQUEST_TIMEOUT', .02):
+                    task = asyncio.create_task(channel.send(b'k' * 40, False))
+                    try:
+                        done, _ = await asyncio.wait((task,), timeout=1)
+                        self.assertIn(task, done, 'request capacity deadline was lost')
+                        with self.assertRaises(asyncio.TimeoutError):
+                            task.result()
+                    finally:
+                        task.cancel()
+                        done, _ = await asyncio.wait((task,), timeout=1)
+                        self.assertIn(task, done)
+                self.assertFalse(channel.pending)
+                self.assertEqual((channel.pending_bytes, self.lane.inflight,
+                                  self.lane.queued_bytes), (0, 0, 0))
+
+    async def test_nonwaiting_lane_reservation_never_awaits_capacity_or_overbooks(self):
+        with patch('proxy.cf_h2.MAX_LANE_REQUESTS', 1), \
+                patch.object(self.lane.capacity, 'wait_for',
+                             side_effect=AssertionError('nonwaiting reserve waited')):
+            try:
+                self.assertTrue(await self.lane._reserve(40, wait=False))
+                self.assertFalse(await self.lane._reserve(40, wait=False))
+                self.assertEqual((self.lane.inflight, self.lane.queued_bytes), (1, 40))
+            finally:
+                if self.lane.inflight:
+                    await self.lane._release(40)
+        self.assertEqual((self.lane.inflight, self.lane.queued_bytes), (0, 0))
+
     async def test_same_auth_prefix_out_of_order_replies_stay_with_source_channel(self):
         first_started, release_first = asyncio.Event(), asyncio.Event()
         body_a, body_b = b'samekey!' + b'a' * 32, b'samekey!' + b'b' * 32

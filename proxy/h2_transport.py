@@ -47,7 +47,10 @@ class _ResponseStream(httpx.AsyncByteStream):
 
     async def wait(self):
         try:
-            await asyncio.wait_for(self.changed.wait(), self.read_timeout)
+            if self.read_timeout is not None and self.read_timeout <= 0:
+                raise asyncio.TimeoutError
+            async with asyncio.timeout(self.read_timeout):
+                await self.changed.wait()
         except asyncio.TimeoutError as exc:
             error = httpx.ReadTimeout('Timed out waiting for H2 stream %d' % self.stream_id)
             # An idle socket can remain established after the path stops
@@ -115,7 +118,10 @@ class _Connection:
     async def drain(self):
         try:
             async with self.write_lock:
-                await asyncio.wait_for(self.writer.drain(), self.write_timeout)
+                if self.write_timeout is not None and self.write_timeout <= 0:
+                    raise asyncio.TimeoutError
+                async with asyncio.timeout(self.write_timeout):
+                    await self.writer.drain()
         except asyncio.TimeoutError as exc:
             error = httpx.WriteTimeout('H2 connection write timed out')
             self.fail(error)
@@ -205,7 +211,10 @@ class _Connection:
                 return stream
             remaining = None if deadline is None else max(0, deadline - time.monotonic())
             try:
-                await asyncio.wait_for(self.changed.wait(), remaining)
+                if remaining is not None and remaining <= 0:
+                    raise asyncio.TimeoutError
+                async with asyncio.timeout(remaining):
+                    await self.changed.wait()
             except asyncio.TimeoutError as exc:
                 raise httpx.PoolTimeout('H2 stream capacity exhausted') from exc
 
@@ -220,7 +229,10 @@ class _Connection:
                             self.h2.local_flow_control_window(stream.stream_id))
                 if count <= 0:
                     try:
-                        await asyncio.wait_for(self.changed.wait(), self.write_timeout)
+                        if self.write_timeout is not None and self.write_timeout <= 0:
+                            raise asyncio.TimeoutError
+                        async with asyncio.timeout(self.write_timeout):
+                            await self.changed.wait()
                     except asyncio.TimeoutError as exc:
                         raise httpx.WriteTimeout('H2 upload flow control timed out') from exc
                     continue
@@ -303,7 +315,8 @@ class _Connection:
         self.reader_task.cancel()
         await asyncio.gather(self.reader_task, return_exceptions=True)
         try:
-            await asyncio.wait_for(self.writer.wait_closed(), 2)
+            async with asyncio.timeout(2):
+                await self.writer.wait_closed()
         except (OSError, asyncio.TimeoutError):
             pass
 
@@ -338,9 +351,12 @@ class H2Transport(httpx.AsyncBaseTransport):
                     await trace('connection.connect_tcp.started', {})
                 writer = None
                 try:
-                    reader, writer = await asyncio.wait_for(asyncio.open_connection(
-                        *origin, ssl=self.ssl_context, server_hostname=origin[0]),
-                        timeouts.get('connect'))
+                    connect_timeout = timeouts.get('connect')
+                    if connect_timeout is not None and connect_timeout <= 0:
+                        raise asyncio.TimeoutError
+                    async with asyncio.timeout(connect_timeout):
+                        reader, writer = await asyncio.open_connection(
+                            *origin, ssl=self.ssl_context, server_hostname=origin[0])
                     if writer.get_extra_info('ssl_object').selected_alpn_protocol() != 'h2':
                         raise httpx.RemoteProtocolError('CF origin did not negotiate h2')
                     self.connection = _Connection(reader, writer, self.max_streams, timeouts.get('write'))
