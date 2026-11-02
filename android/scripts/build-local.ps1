@@ -2,6 +2,7 @@
 param(
     [string]$ToolRoot,
     [switch]$Delivery,
+    [switch]$Offline,
     [switch]$DeviceTests,
     [string]$Serial,
     [switch]$VerifyToolchainOnly
@@ -139,6 +140,7 @@ try {
         archives = $archiveHashes
         deviceTests = [bool]$DeviceTests
         deliveryVariant = [bool]$Delivery
+        offline = [bool]$Offline
         selectedSerial = $Serial
     } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $reportPath -Encoding utf8
     Write-Host "Toolchain verified. Private report: $reportPath"
@@ -155,6 +157,7 @@ try {
     $variant = if ($Delivery) { 'Release' } else { 'Debug' }
     $tasks = @(':core:verifySshArtifacts', ':app:verifyHelperPayload', ':core:test', ":app:test${variant}UnitTest", ":app:assemble$variant", ":app:lint$variant")
     if ($Delivery) { $tasks += '-Ptgproxy.testBuildType=release' }
+    if ($Offline) { $tasks += '--offline' }
     & $wrapper @tasks --no-daemon --console=plain 2>&1 | Tee-Object -FilePath $logPath
     if ($LASTEXITCODE -ne 0) { throw "Build/checks failed. Private log: $logPath" }
     $variantLower = $variant.ToLowerInvariant()
@@ -173,6 +176,7 @@ try {
         } else {
             $deviceTasks += '-Pandroid.testInstrumentationRunnerArguments.notClass=io.github.byshadow64.tgproxy.UpgradePersistenceInstrumentedTest,io.github.byshadow64.tgproxy.Upgrade012InstrumentedTest,io.github.byshadow64.tgproxy.DirectRuntimeInstrumentedTest,io.github.byshadow64.tgproxy.LivePairingRuntimeInstrumentedTest,io.github.byshadow64.tgproxy.LiveSshRuntimeInstrumentedTest,io.github.byshadow64.tgproxy.SshForegroundRuntimeInstrumentedTest'
         }
+        if ($Offline) { $deviceTasks += '--offline' }
         & $wrapper @deviceTasks --no-daemon --console=plain 2>&1 | Tee-Object -FilePath $logPath -Append
         if ($LASTEXITCODE -ne 0) { throw "Device checks failed. Private log: $logPath" }
     }
