@@ -56,25 +56,62 @@ class HTTPConnectionBoundsTests(unittest.TestCase):
     def test_all_address_attempts_share_deadline_and_failed_sockets_close(self):
         addresses = [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('127.0.0.1', port)) for port in range(100)]
         sockets = []
+        now = [100.0]
+        deadline = now[0] + .08
+        clock = mock.Mock()
+        clock.monotonic.side_effect = lambda: now[0]
 
         def make_socket(*_):
+            self.assertLess(now[0], deadline, 'A socket was created after the shared deadline')
             sock = mock.Mock()
             def fail(*_):
-                time.sleep(.03)
+                now[0] += .03
                 raise ConnectionRefusedError('synthetic')
             sock.connect.side_effect = fail
             sockets.append(sock)
             return sock
 
-        with mock.patch.object(socket, 'getaddrinfo', return_value=addresses), \
+        # Model elapsed TCP time explicitly: counting real short sleeps against
+        # a coarse platform clock can permit a different number of attempts.
+        # Replace only this module's time namespace, not the real wall clock.
+        with mock.patch.object(http_transport, 'time', clock), \
+                mock.patch.object(socket, 'getaddrinfo', return_value=addresses), \
                 mock.patch.object(socket, 'socket', side_effect=make_socket):
             started = time.monotonic()
             with self.assertRaises(TimeoutError):
-                http_transport.create_connection(('synthetic.invalid', 443), deadline=started + .08)
+                http_transport.create_connection(('synthetic.invalid', 443), deadline=deadline)
             self.assertLess(time.monotonic() - started, .4)
-        self.assertLessEqual(len(sockets), 3)
-        for sock in sockets:
+        self.assertEqual(len(sockets), 3)
+        self.assertAlmostEqual(now[0], 100.09)
+        for attempt, sock in enumerate(sockets):
+            sock.connect.assert_called_once_with(addresses[attempt][-1])
+            sock.settimeout.assert_called_once()
+            self.assertAlmostEqual(sock.settimeout.call_args.args[0], .08 - attempt * .03)
             sock.close.assert_called_once()
+
+    def test_successful_connect_at_or_after_deadline_is_rejected_and_socket_closes(self):
+        addresses = [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('127.0.0.1', 443))]
+        for elapsed in (.08, .09):
+            with self.subTest(elapsed=elapsed):
+                now = [100.0]
+                deadline = now[0] + .08
+                clock = mock.Mock()
+                clock.monotonic.side_effect = lambda: now[0]
+                sock = mock.Mock()
+
+                def connect(_):
+                    now[0] += elapsed
+
+                sock.connect.side_effect = connect
+                with mock.patch.object(http_transport, 'time', clock), \
+                        mock.patch.object(http_transport, '_addresses', return_value=addresses), \
+                        mock.patch.object(socket, 'socket', return_value=sock):
+                    with self.assertRaisesRegex(TimeoutError, '^HTTP connection deadline exceeded$'):
+                        http_transport.create_connection(('synthetic.invalid', 443), deadline=deadline)
+                sock.connect.assert_called_once_with(addresses[0][-1])
+                sock.settimeout.assert_called_once()
+                self.assertAlmostEqual(sock.settimeout.call_args.args[0], .08)
+                sock.close.assert_called_once()
 
     def test_real_loopback_connection_preserves_source_binding_and_timeout(self):
         with socket.socket() as listener:
