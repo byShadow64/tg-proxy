@@ -1,7 +1,7 @@
 # Сборка Android
 
 Проект использует Kotlin и Jetpack Compose, поддерживает Android 8.0/API26
-и новее. Текущая dev-версия — 0.1.9-dev, versionCode 11.
+и новее. Текущая dev-версия — 0.1.10-dev, versionCode 12.
 
 ## Требования
 

@@ -18,8 +18,8 @@ android {
         applicationId = "io.github.byshadow64.tgproxy"
         minSdk = 26
         targetSdk = 36
-        versionCode = 11
-        versionName = "0.1.9-dev"
+        versionCode = 12
+        versionName = "0.1.10-dev"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

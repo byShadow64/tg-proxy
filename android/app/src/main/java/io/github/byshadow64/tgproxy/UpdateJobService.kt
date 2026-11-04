@@ -24,7 +24,11 @@ class UpdateJobService : JobService() {
                 // A stopped/replaced invocation must not finish another job with the same id.
                 if (active[params.jobId] === task) {
                     active.remove(params.jobId)
-                    jobFinished(params, false)
+                    // Keep the one-off job through JobScheduler's own completion protocol.
+                    // Scheduling its replacement before this async completion can see the
+                    // still-running job and silently lose a failed download's retry.
+                    jobFinished(params, params.jobId == UpdateManager.DOWNLOAD_JOB_ID &&
+                        UpdateManager.shouldRescheduleDownload())
                 }
             }
         }
@@ -33,8 +37,9 @@ class UpdateJobService : JobService() {
 
     override fun onStopJob(params: JobParameters): Boolean {
         // Binder delivers a new JobParameters instance for stop; jobId is its identity.
-        active.remove(params.jobId)?.cancelled?.set(true)
-        return false
+        val task = active.remove(params.jobId) ?: return false
+        task.cancelled.set(true)
+        return params.jobId == UpdateManager.DOWNLOAD_JOB_ID && UpdateManager.shouldRescheduleDownload()
     }
 
     override fun onDestroy() {

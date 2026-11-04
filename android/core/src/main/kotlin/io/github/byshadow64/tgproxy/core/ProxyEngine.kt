@@ -78,6 +78,12 @@ class ProxyEngine(private val config: EngineConfig, private val listener: (Engin
 
     override fun close() = stop()
 
+    /** Retire obsolete upstreams without replacing the loopback listener or applied configuration. */
+    fun networkChanged() {
+        val current = synchronized(lock) { run } ?: return
+        current.networkChanged()
+    }
+
     fun snapshot() = EngineStats(
         state = if (run == null) EngineState.STOPPED else EngineState.RUNNING,
         port = if (run == null) 0 else config.port,
@@ -107,6 +113,18 @@ class ProxyEngine(private val config: EngineConfig, private val listener: (Engin
         val keepAlives = java.util.concurrent.ThreadPoolExecutor(2, 2, 30, TimeUnit.SECONDS, ArrayBlockingQueue(64), daemonFactory("keepalive"), ThreadPoolExecutor.AbortPolicy()).apply { allowCoreThreadTimeOut(true) }
         val acceptor = Thread({ accept() }, "tgproxy-listener").apply { isDaemon = true }
         @Volatile var closing = false
+
+        fun networkChanged() {
+            val obsolete = synchronized(this) {
+                if (closing) return
+                BoundedDns.networkChanged()
+                directRoutes.networkChanged()
+                sessions.toList()
+            }
+            // Sessions accepted after the snapshot use the new caches and stay alive.
+            // finish is idempotent with the worker/Stop cleanup, including its slot release.
+            obsolete.forEach(::finish)
+        }
 
         fun start() {
             watchdog.scheduleAtFixedRate({
