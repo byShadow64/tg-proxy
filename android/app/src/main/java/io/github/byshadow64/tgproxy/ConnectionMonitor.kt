@@ -88,7 +88,7 @@ internal class ConnectionMonitor internal constructor(private val source: Defaul
     }
 }
 
-private class AndroidDefaultNetworkSource(private val manager: ConnectivityManager) : DefaultNetworkSource {
+internal class AndroidDefaultNetworkSource(private val manager: ConnectivityManager) : DefaultNetworkSource {
     private val callbacks = IdentityHashMap<DefaultNetworkSource.Listener, ConnectivityManager.NetworkCallback>()
     override fun current(): Any? = manager.activeNetwork
 

@@ -11,9 +11,9 @@ internal enum class DirectStrategy { OFFICIAL_DNS, FIXED_IP, FRONTED_IP, RELAY_W
 internal data class DirectRoute(val dc: Int, val media: Boolean, val domain: String, val host: String, val strategy: DirectStrategy)
 
 /** Only authenticated setup races; client init/payload is sent once to the selected winner. */
-internal class RoutedTransport(val delegate: BinaryTransport, val route: DirectRoute, private val planner: DirectRoutePlanner) : BinaryTransport {
-    fun confirmedResponse() = planner.confirm(route)
-    fun failedFirstReply() = planner.fail(route)
+internal class RoutedTransport(val delegate: BinaryTransport, val route: DirectRoute, private val planner: DirectRoutePlanner, private val networkGeneration: Long) : BinaryTransport {
+    fun confirmedResponse() = planner.confirm(route, networkGeneration)
+    fun failedFirstReply() = planner.fail(route, networkGeneration)
     override fun send(bytes: ByteArray) = delegate.send(bytes)
     override fun receive() = delegate.receive()
     override fun claimKeepAlive(nowNanos: Long) = delegate.claimKeepAlive(nowNanos)
@@ -35,6 +35,12 @@ internal class DirectRoutePlanner(
     private val preferred = mutableMapOf<Pair<Int, Boolean>, DirectRoute>()
     private val failedUntil = mutableMapOf<DirectRoute, Long>()
     private var relayOffset = 0
+    private var networkGeneration = 0L
+    @Synchronized fun networkChanged() {
+        networkGeneration++
+        preferred.clear()
+        failedUntil.clear()
+    }
     private val executor by lazy {
         ThreadPoolExecutor(8, 8, 30, TimeUnit.SECONDS, ArrayBlockingQueue(256), { task ->
             Thread(task, "tgproxy-dial").apply { isDaemon = true }
@@ -48,7 +54,7 @@ internal class DirectRoutePlanner(
     }
 
     fun connect(handshake: ClientHandshake, io: SessionIo): RoutedTransport = io.operation("route-setup", setupTimeoutMillis.toInt()) {
-        val routes = plan(handshake).take(4)
+        val (generation, routes) = synchronized(this) { networkGeneration to plan(handshake).take(4) }
         val completed = ArrayBlockingQueue<FutureTask<Attempt>>(4)
         val attempts = mutableListOf<Attempt>()
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(setupTimeoutMillis)
@@ -58,7 +64,10 @@ internal class DirectRoutePlanner(
         fun reportFailure(attempt: Attempt) {
             if (attempt.failureReported) return
             attempt.failureReported = true
-            fail(attempt.route)
+            synchronized(this) {
+                if (generation != networkGeneration) return
+                fail(attempt.route, generation)
+            }
             try { onAttemptFailure(attempt.route, attempt.io.failureStage) } catch (_: Exception) {}
         }
         var last: Exception = java.net.ConnectException()
@@ -91,7 +100,7 @@ internal class DirectRoutePlanner(
                     val result = task.get()
                     if (io.closed || result.io.closed) throw java.io.EOFException()
                     result.io.activateTransfer(); selected = result
-                    return@operation RoutedTransport(result.transport.get()!!, result.route, this)
+                    return@operation RoutedTransport(result.transport.get()!!, result.route, this, generation)
                 } catch (failure: java.util.concurrent.ExecutionException) {
                     last = failure.cause as? Exception ?: java.io.IOException()
                     attempts.firstOrNull { it.task === task }?.let {
@@ -115,10 +124,12 @@ internal class DirectRoutePlanner(
         }
     }
 
-    @Synchronized fun confirm(route: DirectRoute) {
+    @Synchronized fun confirm(route: DirectRoute, generation: Long = networkGeneration) {
+        if (generation != networkGeneration) return
         preferred[route.dc to route.media] = route; failedUntil.remove(route)
     }
-    @Synchronized fun fail(route: DirectRoute) {
+    @Synchronized fun fail(route: DirectRoute, generation: Long = networkGeneration) {
+        if (generation != networkGeneration) return
         failedUntil[route] = now() + TimeUnit.SECONDS.toNanos(30)
         if (preferred[route.dc to route.media] == route) preferred.remove(route.dc to route.media)
     }

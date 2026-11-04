@@ -12,6 +12,7 @@ import androidx.core.app.NotificationCompat
 import io.github.byshadow64.tgproxy.core.*
 import io.github.byshadow64.tgproxy.ui.ProxyStatus
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicInteger
@@ -29,12 +30,24 @@ class ProxyService : Service() {
     private val wakePolicy = NetworkWakePolicy(SystemClock::elapsedRealtime)
     private var networkWakeLock: PowerManager.WakeLock? = null
     private var wakeRenewedAt = 0L
+    // At most one newer transition waits behind an in-progress engine operation.
+    // Each request belongs to the engine/run that observed it, never a later start.
+    private val networkChanges = Channel<Pair<Int, ProxyEngine>>(Channel.CONFLATED)
+    private val networkMonitor by lazy { ServiceNetworkMonitor(this) {
+        engine.get()?.let { networkChanges.trySend(generation.get() to it) }
+    } }
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onCreate() {
         super.onCreate()
         AppRuntime.initialize(this)
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL, getString(R.string.service_channel), NotificationManager.IMPORTANCE_LOW))
+        scope.launch {
+            for ((run, target) in networkChanges) operations.withLock {
+                if (generation.get() == run && engine.get() === target) target.networkChanged()
+            }
+        }
+        networkMonitor.start()
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         latestStartId = startId
@@ -167,6 +180,8 @@ class ProxyService : Service() {
             .addAction(R.drawable.ic_proxy_notification, getString(R.string.service_stop), stop).build()
     }
     override fun onDestroy() {
+        networkMonitor.stop()
+        networkChanges.close()
         generation.incrementAndGet()
         stopEngine()
         if (AppRuntime.state.value.status != ProxyStatus.ERROR) AppRuntime.stopped()

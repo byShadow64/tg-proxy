@@ -26,14 +26,30 @@ internal class SharedHostResolver(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Cached>?) = size > 64
     }
     @Volatile private var closed = false
-    private inner class Lookup(val host: String) {
+    private var networkGeneration = 0L
+
+    /** A previous network's native DNS may finish late; it must never repopulate this cache. */
+    fun networkChanged() {
+        synchronized(lock) {
+            if (closed) return
+            networkGeneration++
+            cache.clear()
+            val obsolete = inFlight.values.toList()
+            inFlight.clear()
+            // Running native calls remain bounded by the same two workers. Retire queued
+            // work without interruption; new-network callers must not join an old lookup.
+            obsolete.filter { !it.started.get() && executor.remove(it.task) }.forEach { it.task.cancel(false) }
+        }
+    }
+
+    private inner class Lookup(val host: String, val generation: Long) {
         val started = AtomicBoolean()
         var waiters = 0
         val task: FutureTask<List<InetAddress>> = object : FutureTask<List<InetAddress>>(Callable { lookupAddresses(host) }) {
             override fun run() { started.set(true); super.run() }
             override fun done() {
                 synchronized(lock) {
-                    if (!isCancelled && !closed) try {
+                    if (!isCancelled && !closed && generation == networkGeneration) try {
                         val addresses = get()
                         if (addresses.isNotEmpty()) cache[host] = Cached(addresses, System.nanoTime() + TimeUnit.SECONDS.toNanos(60))
                     } catch (_: Exception) {}
@@ -47,7 +63,7 @@ internal class SharedHostResolver(
         val lookup = synchronized(lock) {
             if (closed || io.closed) throw EOFException()
             cache[host]?.takeIf { it.until > System.nanoTime() }?.let { return@operation it.addresses }
-            val shared = inFlight[host] ?: Lookup(host).also {
+            val shared = inFlight[host] ?: Lookup(host, networkGeneration).also {
                 executor.execute(it.task)
                 inFlight[host] = it
             }

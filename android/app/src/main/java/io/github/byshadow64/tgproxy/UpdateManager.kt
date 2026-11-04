@@ -168,7 +168,17 @@ object UpdateManager {
         val delay = UpdatePolicy.retryDelay(System.currentTimeMillis(), preferences.getLong("download_attempt", 0))
         scheduler.schedule(JobInfo.Builder(DOWNLOAD_JOB_ID, ComponentName(context, UpdateJobService::class.java))
             .setRequiredNetworkType(JobInfo.NETWORK_TYPE_UNMETERED).setRequiresBatteryNotLow(true)
+            .setBackoffCriteria(UpdatePolicy.RETRY, JobInfo.BACKOFF_POLICY_LINEAR)
             .setMinimumLatency(delay).setPersisted(true).build())
+    }
+
+    /** Retry through Android after completion/constraint loss, never by polling the network. */
+    internal fun shouldRescheduleDownload(): Boolean {
+        if (!::context.isInitialized || !state.value.automatic || !state.value.wifiDownload) return false
+        // A persisted job may be stopped while its signed cache is still restoring.
+        // Retain it conservatively; background() waits for verification before any download.
+        if (!initializedReady.isCompleted) return true
+        return manifest != null && !hasVerifiedApk() && !installing()
     }
 
     /** The JobService owns this token even while the controller is still restoring. */

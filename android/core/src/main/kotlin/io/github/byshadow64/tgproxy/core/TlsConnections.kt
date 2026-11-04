@@ -22,6 +22,8 @@ internal object BoundedDns {
     private val executor = dnsExecutor()
     private val shared = SharedHostResolver(executor = executor)
 
+    fun networkChanged() = shared.networkChanged()
+
     fun resolve(host: String, io: SessionIo): InetAddress = resolveAll(host, io).first()
 
     fun resolveAll(host: String, io: SessionIo, timeoutMs: Int = 5_000): List<InetAddress> {
@@ -50,17 +52,18 @@ internal fun tlsConnect(
     factory: SSLSocketFactory = SSLContext.getDefault().socketFactory,
     sni: String? = null, timeoutMs: Int = HANDSHAKE_TIMEOUT_MS,
     resolve: (String, SessionIo, Int) -> List<InetAddress> = BoundedDns::resolveAll,
+    nowNanos: () -> Long = System::nanoTime,
 ): SSLSocket {
     if (sni != null && (domain == null || !isTelegramOrigin(domain))) throw ProtocolException()
     require(timeoutMs > 0)
-    val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs.toLong())
-    val addresses = resolve(host, io, remainingConnectMillis(deadline, io))
-    val raw = connectResolvedAddresses(addresses, port, io, deadline)
+    val deadline = nowNanos() + TimeUnit.MILLISECONDS.toNanos(timeoutMs.toLong())
+    val addresses = resolve(host, io, remainingConnectMillis(deadline, io, nowNanos))
+    val raw = connectResolvedAddresses(addresses, port, io, deadline, nowNanos = nowNanos)
     var tls: SSLSocket? = null
     try {
         val connected = io.track(factory.createSocket(raw, domain ?: host, port, true), raw) as SSLSocket
         tls = connected
-        val handshakeTimeout = remainingConnectMillis(deadline, io)
+        val handshakeTimeout = remainingConnectMillis(deadline, io, nowNanos)
         connected.soTimeout = handshakeTimeout
         connected.enabledProtocols = connected.supportedProtocols.filter { it == "TLSv1.2" || it == "TLSv1.3" }.toTypedArray()
         connected.sslParameters = connected.sslParameters.apply {
@@ -72,8 +75,13 @@ internal fun tlsConnect(
                 serverNames = emptyList()
             }
         }
-        io.operation("tls", handshakeTimeout, connected) { connected.startHandshake() }
-        if (sni != null) verifyTelegramIdentity(connected.session.peerCertificates[0] as X509Certificate, domain!!)
+        io.operation("tls", handshakeTimeout, connected) {
+            connected.startHandshake()
+            if (sni != null) verifyTelegramIdentity(connected.session.peerCertificates[0] as X509Certificate, domain!!)
+            // SO_TIMEOUT/watchdog expiry can race a successful native return. Completion
+            // still belongs to the original DNS+TCP+TLS budget, even at its exact edge.
+            remainingConnectMillis(deadline, io, nowNanos)
+        }
         connected.soTimeout = 0
         return connected
     } catch (failure: Throwable) {
@@ -85,9 +93,9 @@ internal fun tlsConnect(
     }
 }
 
-private fun remainingConnectMillis(deadline: Long, io: SessionIo): Int {
+private fun remainingConnectMillis(deadline: Long, io: SessionIo, nowNanos: () -> Long = System::nanoTime): Int {
     if (io.closed) throw java.io.EOFException()
-    val nanos = deadline - System.nanoTime()
+    val nanos = deadline - nowNanos()
     if (nanos <= 0) throw SocketTimeoutException()
     return ((nanos + 999_999) / 1_000_000).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
 }
@@ -95,13 +103,14 @@ private fun remainingConnectMillis(deadline: Long, io: SessionIo): Int {
 /** A bad first A/AAAA record must not discard the rest of a host's bounded DNS answer. */
 internal fun connectResolvedAddresses(
     addresses: List<InetAddress>, port: Int, io: SessionIo, deadline: Long,
+    nowNanos: () -> Long = System::nanoTime,
     socketFactory: () -> Socket = ::Socket,
 ): Socket {
     val candidates = addresses.distinctBy { it.hostAddress }.take(8)
     if (candidates.isEmpty()) throw UnknownHostException()
     var lastFailure: java.io.IOException? = null
     for ((index, address) in candidates.withIndex()) {
-        val remaining = remainingConnectMillis(deadline, io)
+        val remaining = remainingConnectMillis(deadline, io, nowNanos)
         // Leave time for other addresses if an early TCP SYN is blackholed. All attempts and
         // the following TLS handshake still share the original caller's setup deadline.
         val timeout = minOf(CONNECT_TIMEOUT_MS, remaining, if (index < candidates.lastIndex) 1_500 else remaining)
@@ -109,8 +118,10 @@ internal fun connectResolvedAddresses(
         try {
             socket.tcpNoDelay = true
             socket.receiveBufferSize = STREAM_CHUNK_BYTES; socket.sendBufferSize = STREAM_CHUNK_BYTES
-            io.operation("connect", timeout, socket) { socket.connect(InetSocketAddress(address, port), timeout) }
-            if (io.closed) throw java.io.EOFException()
+            io.operation("connect", timeout, socket) {
+                socket.connect(InetSocketAddress(address, port), timeout)
+                remainingConnectMillis(deadline, io, nowNanos)
+            }
             return socket
         } catch (failure: Throwable) {
             io.abort(socket)
