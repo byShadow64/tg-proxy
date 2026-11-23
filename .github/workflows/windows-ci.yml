@@ -163,7 +163,7 @@ jobs:
           done
           test "$ready" = yes
           docker logs tg-proxy-ci > "$RUNNER_TEMP/docker-smoke.log" 2>&1
-          if grep -Eqi '(tg://proxy|secret:[[:space:]]+[[:xdigit:]]{32})' "$RUNNER_TEMP/docker-smoke.log"; then
+          if grep -Eqi 'secret[=:][[:space:]]*(dd|ee)?[[:xdigit:]]{32}' "$RUNNER_TEMP/docker-smoke.log"; then
             echo "Connection information was written to the startup log"
             exit 1
           fi

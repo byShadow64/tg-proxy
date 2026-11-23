@@ -282,7 +282,9 @@ class ElevatedBinaryReplacementTest(unittest.TestCase):
             src = directory / 'download with spaces'
             shutil.copy2(shutil.which('sleep'), exe)
             src.write_bytes(b'new')
-            process = subprocess.Popen([str(exe), '30'])
+            # A multicall coreutils binary selects sleep from argv[0].
+            # The process still runs the copied executable at the tested path.
+            process = subprocess.Popen(['sleep', '30'], executable=str(exe))
             try:
                 with mock.patch.object(linux_update, '_is_root', return_value=True):
                     cmd = linux_update.replace_binary_cmd(src, exe)
