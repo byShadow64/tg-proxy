@@ -497,6 +497,31 @@ class TgProxyUiTest {
     }
 
     @Test
+    fun waitingSshSetupHasResumeAndCancelWithoutFalseProgress() {
+        var state by mutableStateOf(TgProxyUiState(sshSetup = SshSetupUiState(
+            phase = SshSetupPhase.CONFIRM_HOST_KEY, host = "192.0.2.10")))
+        var starts = 0
+        compose.setContent { TgProxyApp(state, TgProxyActions(onStart = { starts++ },
+            onResetHelperSsh = { state = state.copy(sshSetup = SshSetupUiState()) })) }
+        scrollTo("overview_content", "proxy_action")
+        compose.onNodeWithTag("proxy_action").assertIsNotEnabled()
+        compose.onNodeWithTag("proxy_progress").assertDoesNotExist()
+        scrollTo("overview_content", "ssh_resume")
+        compose.onNodeWithTag("ssh_resume").performClick()
+        compose.onNodeWithTag("nav_1").assertIsSelected()
+        scrollTo("routes_content", "ssh_confirm_key")
+        compose.onNodeWithTag("ssh_confirm_key").assertIsDisplayed()
+        compose.onNodeWithTag("nav_0").performClick()
+        compose.runOnIdle { state = state.copy(sshSetup = state.sshSetup.copy(phase = SshSetupPhase.READY)) }
+        scrollTo("overview_content", "ssh_pending_reset")
+        compose.onNodeWithTag("ssh_pending_reset").performClick()
+        compose.onNodeWithTag("ssh_pending_notice").assertDoesNotExist()
+        scrollTo("overview_content", "proxy_action")
+        compose.onNodeWithTag("proxy_action").assertIsEnabled().performClick()
+        compose.runOnIdle { assertEquals(1, starts) }
+    }
+
+    @Test
     fun resetSshWizardDoesNotTransferConsentToAnotherEndpointWithSameKey() {
         var state by mutableStateOf(TgProxyUiState(registrySetupRequired = true, sshSetup = SshSetupUiState(phase = SshSetupPhase.READY,
             host = "192.0.2.10", fingerprint = "SHA256:synthetic-same-test-key")))

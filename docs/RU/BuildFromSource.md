@@ -7,8 +7,11 @@
 
 ```bash
 pip install -e .
-tg-ws-proxy
+tg-ws-proxy --show-connection-info
 ```
+
+Последняя команда показывает ссылку подключения в текущем терминале. Для
+фонового запуска задайте `--secret-file` и используйте известный ключ.
 
 ## Tray-приложение по ОС
 
@@ -22,7 +25,8 @@ tg-ws-proxy-tray-win
 Для сборки Windows 10/11 `.exe` установите build-extra и запустите spec-файл:
 
 ```powershell
-python -m pip install ".[build]"
+python -m pip install --only-binary=:all: --require-hashes -r packaging/python-build-backend.lock
+python -m pip install --no-build-isolation --constraint packaging/python-build-constraints.txt ".[build]"
 python -m PyInstaller packaging/windows.spec
 ```
 
@@ -56,7 +60,8 @@ tg-ws-proxy [--port PORT] [--host HOST] [--dc-ip DC:IP ...] [-v]
 |---|---|---|
 | `--port` | `1443` | Порт прокси |
 | `--host` | `127.0.0.1` | Хост прокси |
-| `--secret` | `random` | 32-значный hex-ключ для авторизации клиентов |
+| `--secret-file` | случайный ключ | Файл с 32 символами hex. В Linux/macOS файл должен принадлежать пользователю запуска и быть доступен только ему |
+| `--show-connection-info` | выключено | Показать секрет и ссылку в текущей консоли. Используйте только в приватном терминале |
 | `--dc-ip` | `2:149.154.167.220`, `4:149.154.167.220` | Целевой IP для DC (параметр можно указывать несколько раз) |
 | `--no-cfproxy` | `false` | Отключить попытку [проксирования через Cloudflare](./CfProxy.md) |
 | `--no-h2` | `false` | Отключить мультиплексирование медиа через HTTP/2 в CF-прокси |
@@ -77,7 +82,7 @@ tg-ws-proxy [--port PORT] [--host HOST] [--dc-ip DC:IP ...] [-v]
 
 ```bash
 # Стандартный запуск
-tg-ws-proxy --secret 00112233445566778899aabbccddeeff
+tg-ws-proxy --secret-file ./tg-proxy.secret
 
 # Другой порт и дополнительные DC
 tg-ws-proxy --port 9050 --dc-ip 1:149.154.175.205 --dc-ip 2:149.154.167.220

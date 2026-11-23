@@ -1,4 +1,6 @@
 <resources>
+    <string name="ssh_waiting_body">Helper setup is waiting for your confirmation. Continue or cancel it to start the proxy.</string>
+    <string name="ssh_resume">Continue Helper setup</string>
     <string name="ssh_setup_title">Install Helper through SSH</string>
     <string name="ssh_setup_body">Ubuntu or Debian with root access. The wizard uploads Helper sources bundled with the app, installs the service and registers the server. Certificate verification needs free ports 80 and 443.</string>
     <string name="ssh_port">SSH port</string>

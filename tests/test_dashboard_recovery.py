@@ -168,6 +168,10 @@ class DashboardRecoveryTest(unittest.TestCase):
                 stack.enter_context(mock.patch.object(app, "_tray_icon", None))
                 stack.enter_context(mock.patch.object(app, "load_config", return_value={}))
                 acknowledge = stack.enter_context(mock.patch.object(app, "acknowledge_update"))
+                stack.enter_context(mock.patch.object(app, "update_ack_pending", return_value=True))
+                stack.enter_context(mock.patch.object(app, "proxy_listener_ready", return_value=True))
+                stack.enter_context(mock.patch.object(app, "_startup_ack_thread", None))
+                stack.enter_context(mock.patch.object(app, "_exiting", False))
                 stack.enter_context(mock.patch.object(app, "is_windows_dark_theme", return_value=False))
                 for name in ("bootstrap", "start_proxy", "check_update_async", "_show_first_run",
                              "check_ipv6_warning", "load_icon", "_build_menu", "stop_proxy"):
@@ -177,6 +181,7 @@ class DashboardRecoveryTest(unittest.TestCase):
                 self.assertEqual(manager.mock_calls, expected)
                 acknowledge.assert_not_called()
                 icon.run.call_args.kwargs["setup"](icon)
+                app._startup_ack_thread.join(timeout=2)
                 self.assertTrue(icon.visible)
                 acknowledge.assert_called_once_with()
 

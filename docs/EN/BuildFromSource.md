@@ -7,8 +7,11 @@ To run only the proxy without the system tray interface, basic installation is s
 
 ```bash
 pip install -e .
-tg-ws-proxy
+tg-ws-proxy --show-connection-info
 ```
+
+The last command displays the connection link in the current terminal. For
+unattended use, set `--secret-file` and connect with the key from that file.
 
 ## Tray Application by OS
 
@@ -47,7 +50,8 @@ tg-ws-proxy [--port PORT] [--host HOST] [--dc-ip DC:IP ...] [-v]
 |---|---|---|
 | `--port` | `1443` | Proxy port |
 | `--host` | `127.0.0.1` | Proxy host |
-| `--secret` | `random` | 32-character hex key for client authorization |
+| `--secret-file` | random key | File containing 32 hex characters. On Linux and macOS, it must be owned and readable only by the user running the proxy |
+| `--show-connection-info` | disabled | Show the secret and connection link in the current console. Use only in a private terminal |
 | `--dc-ip` | `2:149.154.167.220`, `4:149.154.167.220` | Target IP for DC (can be specified multiple times) |
 | `--no-cfproxy` | `false` | Disable [Cloudflare proxying](./CfProxy.md) attempts |
 | `--no-h2` | `false` | Disable HTTP/2 media multiplexing through CF proxy |
@@ -68,7 +72,7 @@ tg-ws-proxy [--port PORT] [--host HOST] [--dc-ip DC:IP ...] [-v]
 
 ```bash
 # Standard startup
-tg-ws-proxy --secret 00112233445566778899aabbccddeeff
+tg-ws-proxy --secret-file ./tg-proxy.secret
 
 # Different port and additional DCs
 tg-ws-proxy --port 9050 --dc-ip 1:149.154.175.205 --dc-ip 2:149.154.167.220

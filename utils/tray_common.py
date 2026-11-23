@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import shutil
+import stat
 import tempfile
 import socket as _socket
 import sys
@@ -18,6 +19,7 @@ import psutil
 
 from proxy import __version__, get_link_host, parse_dc_ip_list, proxy_config, coerce_domain_list
 from proxy.utils import SensitiveDataFormatter
+from proxy.config import RESOURCE_LIMITS, resource_value
 from proxy.tg_ws_proxy import _run
 from utils.default_config import default_tray_config
 from utils.helper_config import effective_helper_mode, helper_is_enabled
@@ -117,6 +119,33 @@ def ensure_dirs() -> None:
 # single-instance lock
 
 _lock_file_path: Optional[Path] = None
+_instance_guard = None
+
+
+def _acquire_instance_guard():
+    """An OS-owned lock is atomic and is released by process death on every platform."""
+    path = APP_DIR / ".instance-lock"
+    if path.is_symlink():
+        raise OSError("Unsafe instance lock")
+    descriptor = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    guard = os.fdopen(descriptor, "r+b")
+    try:
+        info = os.fstat(guard.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or getattr(path.lstat(), "st_file_attributes", 0) & 0x400:
+            raise OSError("Unsafe instance lock")
+        if os.name == "nt":
+            import msvcrt
+            if info.st_size == 0:
+                guard.write(b"\0"); guard.flush()
+            guard.seek(0)
+            msvcrt.locking(guard.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(guard.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return guard
+    except BaseException:
+        guard.close()
+        raise
 
 
 def _same_process(meta: dict, proc: psutil.Process) -> bool:
@@ -131,12 +160,26 @@ def _same_process(meta: dict, proc: psutil.Process) -> bool:
             return Path(proc.exe()).resolve() == Path(sys.executable).resolve()
         except (OSError, psutil.Error):
             return False
-    return False
+    try:
+        if Path(proc.exe()).resolve() != Path(sys.executable).resolve():
+            return False
+        entry = Path(sys.argv[0]).resolve()
+        directory = Path(proc.cwd())
+        arguments = proc.cmdline()[1:]
+        return any((directory / arg).resolve() == entry for arg in arguments if arg and not arg.startswith("-"))
+    except (OSError, ValueError, psutil.Error):
+        return False
 
 
 def acquire_lock() -> bool:
-    global _lock_file_path
+    global _lock_file_path, _instance_guard
     ensure_dirs()
+    if _instance_guard is not None:
+        return True
+    try:
+        guard = _acquire_instance_guard()
+    except OSError:
+        return False
     for f in list(APP_DIR.glob("*.lock")):
         try:
             pid = int(f.stem)
@@ -159,6 +202,7 @@ def acquire_lock() -> bool:
         except Exception:
             pass
         if is_running:
+            guard.close()
             return False
         try:
             f.unlink(missing_ok=True)
@@ -178,17 +222,21 @@ def acquire_lock() -> bool:
         except Exception:
             pass
     _lock_file_path = lock_file
+    _instance_guard = guard
     return True
 
 
 def release_lock() -> None:
-    global _lock_file_path
+    global _lock_file_path, _instance_guard
     if _lock_file_path:
         try:
             _lock_file_path.unlink(missing_ok=True)
         except Exception:
             pass
         _lock_file_path = None
+    guard, _instance_guard = _instance_guard, None
+    if guard is not None:
+        guard.close()
 
 
 # config
@@ -301,6 +349,15 @@ def load_config() -> dict:
         )
     cfg = deepcopy(DEFAULT_CONFIG)
     cfg.update(data)
+    for key in RESOURCE_LIMITS:
+        try:
+            cfg[key] = resource_value(key, cfg[key])
+        except (ValueError, KeyError):
+            if CONFIG_FILE.is_file():
+                _backup_once(CONFIG_FILE, ".invalid-resources.bak")
+            cfg[key] = DEFAULT_CONFIG[key]
+            migrated = True
+            log.warning("Invalid saved resource setting %s; using its default", key)
     _apply_ui_language(cfg)
     if migrated or not CONFIG_FILE.exists() or not data:
         save_config(cfg)
@@ -502,13 +559,19 @@ def apply_proxy_config(cfg: dict) -> bool:
         log.error("Bad config dc_ip: %s", e)
         return False
 
+    try:
+        resources = {name: resource_value(name, cfg.get(name, DEFAULT_CONFIG[name]))
+                     for name in RESOURCE_LIMITS}
+    except ValueError:
+        log.error("Invalid proxy resource settings")
+        return False
     pc = proxy_config
     pc.port = cfg.get("port", DEFAULT_CONFIG["port"])
     pc.host = cfg.get("host", DEFAULT_CONFIG["host"])
     pc.secret = cfg.get("secret", DEFAULT_CONFIG["secret"])
     pc.dc_redirects = dc_redirects
-    pc.buffer_size = max(4, cfg.get("buf_kb", DEFAULT_CONFIG["buf_kb"])) * 1024
-    pc.pool_size = max(0, cfg.get("pool_size", DEFAULT_CONFIG["pool_size"]))
+    pc.buffer_size = resources["buf_kb"] * 1024
+    pc.pool_size = resources["pool_size"]
     pc.fallback_cfproxy = cfg.get("cfproxy", DEFAULT_CONFIG["cfproxy"])
     pc.cfproxy_h2_media = cfg.get("h2", DEFAULT_CONFIG["h2"])
     cfproxy_user_domains = coerce_domain_list(
@@ -563,7 +626,7 @@ def start_proxy(cfg: dict, on_error: Callable[[str], None]) -> bool:
 
         if not apply_proxy_config(cfg):
             from ui.i18n import t
-            on_error(t("error.dc_config"))
+            on_error(t("error.runtime_config"))
             return False
 
         pc = proxy_config
@@ -623,6 +686,19 @@ def proxy_running() -> bool:
     # Dashboard polling must stay responsive while stop_proxy waits in join().
     thread = _proxy_thread
     return bool(thread and thread.is_alive())
+
+
+def proxy_listener_ready() -> bool:
+    """Startup health means this worker has a bound local listener, not merely a thread."""
+    from proxy import tg_ws_proxy
+    control = _async_stop
+    server = tg_ws_proxy._server_instance
+    if not proxy_running() or control is None or tg_ws_proxy._server_stop_event is not control[1] or server is None:
+        return False
+    try:
+        return server.is_serving()
+    except (RuntimeError, OSError):
+        return False
 
 
 def diagnostics_snapshot(config: dict):

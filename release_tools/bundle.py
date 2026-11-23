@@ -122,7 +122,7 @@ def _source_name(value, *, version=None):
             or (diagnostic and not diagnostic_allowed)
             or value.casefold() in _ALWAYS_PROHIBITED
             or "private_do_not_publish" in value.casefold()
-            or name.suffix.lower() in {".exe", ".pyc", ".key", ".pem", ".pfx", ".p12", ".log"}
+            or name.suffix.lower() in {".exe", ".pyc", ".key", ".pem", ".pfx", ".p12", ".secret", ".log"}
             or name.name.casefold() in {".env", "publisher.dpapi.json", "config.json"}
             or name.name.casefold().endswith(".dpapi.json")):
         raise BundleError("private_or_test_source")

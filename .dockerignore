@@ -23,6 +23,7 @@ TgWsProxy_data/
 *.pem
 *.pfx
 *.p12
+*.secret
 packaging/
 windows.py
 icon.ico

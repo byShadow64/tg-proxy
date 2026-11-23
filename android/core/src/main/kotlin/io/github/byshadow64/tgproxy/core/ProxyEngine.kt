@@ -64,6 +64,9 @@ class ProxyEngine(private val config: EngineConfig, private val listener: (Engin
                 throw EngineException(EngineFailureCode.PORT_UNAVAILABLE)
             }
             val next = Run(server, secret)
+            // The default network may have changed while this service was stopped.
+            // Do not carry process-wide positive DNS answers into a fresh run.
+            BoundedDns.networkChanged()
             run = next
             next.start()
         }

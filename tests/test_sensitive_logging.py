@@ -150,6 +150,25 @@ class LoggingIntegrationTest(unittest.TestCase):
         for handler in self.root.handlers:
             handler.close()
 
+    def test_cli_private_file_hides_console_connection_credentials_by_default(self):
+        async def run():
+            self.logger.info("Secret: %s", SECRET, extra={"connection_info": True})
+            self.logger.info("Link: %s", URL, extra={"connection_info": True})
+
+        with tempfile.TemporaryDirectory() as folder, ExitStack() as cleanup:
+            cleanup.callback(self._close_handlers)
+            secret_file = Path(folder) / "secret.txt"
+            secret_file.write_text(SECRET, encoding="ascii")
+            secret_file.chmod(0o600)
+            console = io.StringIO()
+            with patch.object(tg_ws_proxy, "proxy_config", ProxyConfig()), \
+                    patch.object(tg_ws_proxy, "_run", run), \
+                    patch("sys.argv", ["proxy", "--secret-file", str(secret_file)]), \
+                    patch("sys.stderr", console):
+                tg_ws_proxy.main()
+            self.assertNotIn(SECRET, console.getvalue())
+            self.assertIn("<redacted>", console.getvalue())
+
     def test_cli_keeps_intentional_connection_output_but_redacts_file_and_other_messages(self):
         original_run = tg_ws_proxy._run
 
@@ -165,7 +184,7 @@ class LoggingIntegrationTest(unittest.TestCase):
             console = io.StringIO()
             config = ProxyConfig()
             argv = ["proxy", "--secret", SECRET, "--port", "0",
-                    "--pool-size", "0", "--no-cfproxy", "--log-file", str(log_path)]
+                    "--pool-size", "0", "--no-cfproxy", "--show-connection-info", "--log-file", str(log_path)]
             with patch.object(tg_ws_proxy, "proxy_config", config), \
                     patch.object(tg_ws_proxy, "start_cfproxy_domain_refresh"), \
                     patch.object(tg_ws_proxy.ws_pool, "warmup", AsyncMock()), \

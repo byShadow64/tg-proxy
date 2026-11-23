@@ -66,6 +66,8 @@
   "button.donate": "Поддержать ♥",
   "validation.bad_host": "Некорректный IP-адрес.",
   "validation.bad_port": "Порт должен быть числом 1-65535",
+  "validation.resource_range": "{field}: укажите значение от {minimum} до {maximum}.",
+  "error.runtime_config": "Не удалось применить настройки прокси. Проверьте адреса маршрутов и числовые параметры в настройках.",
   "validation.bad_secret_len": "Ключ должен содержать ровно 32 hex-символа (16 байт).",
   "validation.bad_secret_hex": "Ключ должен состоять только из hex-символов (0-9, a-f).",
   "validation.dc_format": "Неверный формат DC:IP: {entry}",

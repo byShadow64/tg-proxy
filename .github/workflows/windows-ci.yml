@@ -31,8 +31,11 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
-      - name: Install project and build dependencies
-        run: python -m pip install ".[helper-server]" "pytest==9.2.0"
+      - name: Install the verified build backend
+        run: >-
+          python -m pip install --only-binary=:all: --require-hashes -r packaging/python-build-backend.lock
+      - name: Install project and test dependencies
+        run: python -m pip install --no-build-isolation --constraint packaging/python-build-constraints.txt ".[helper-server]" "pytest==9.2.0"
       - name: Run tests
         env:
           PYTHONUNBUFFERED: "1"
@@ -87,8 +90,16 @@ jobs:
         with:
           python-version: "3.14"
           cache: pip
+      - name: Install the verified build backend
+        run: >-
+          python -m pip install --only-binary=:all: --require-hashes -r packaging/python-build-backend.lock
       - name: Install project and build dependencies
-        run: python -m pip install ".[build,helper-server]"
+        run: python -m pip install --no-build-isolation --constraint packaging/python-build-constraints.txt ".[build,helper-server]"
+      - name: Record and verify the resolved Windows build environment
+        run: |
+          python -m pip check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip list --format=json > "$env:RUNNER_TEMP/windows-build-dependencies.json"
       - name: Build Windows executable
         run: python -m PyInstaller packaging/windows.spec --noconfirm
       - name: Check executable
@@ -105,3 +116,66 @@ jobs:
           path: dist/publication/*
           if-no-files-found: error
           retention-days: 7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: TgWsProxy-windows-build-dependencies
+          path: ${{ runner.temp }}/windows-build-dependencies.json
+          if-no-files-found: error
+          retention-days: 7
+
+  worker:
+    name: Worker checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify the Worker and its bounded transport
+        run: |
+          node --check worker/telegram-worker.mjs
+          node --test tests/cf_worker_sample.test.mjs
+
+  docker:
+    name: Docker smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the pinned container
+        run: docker build -t tg-proxy-ci-local .
+      - name: Check an isolated container listener and redacted startup log
+        run: |
+          set -eu
+          trap 'docker rm -f tg-proxy-ci >/dev/null 2>&1 || true' EXIT
+          docker run -d --name tg-proxy-ci --network none \
+            -e TG_WS_PROXY_HOST=127.0.0.1 -e TG_WS_PROXY_DC_IPS= tg-proxy-ci-local \
+            --no-cfproxy --pool-size 0 --dc-ip
+          ready=no
+          for attempt in $(seq 1 12); do
+            if docker exec tg-proxy-ci python -c 'import socket; socket.create_connection(("127.0.0.1", 1443), timeout=0.5).close()'; then
+              ready=yes
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = yes
+          docker logs tg-proxy-ci > "$RUNNER_TEMP/docker-smoke.log" 2>&1
+          if grep -Eqi '(tg://proxy|secret:[[:space:]]+[[:xdigit:]]{32})' "$RUNNER_TEMP/docker-smoke.log"; then
+            echo "Connection information was written to the startup log"
+            exit 1
+          fi
+
+  project-ci:
+    name: Project CI gate
+    if: always()
+    needs: [tests, android-core, release-verifier, build-windows, worker, docker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every project check to complete successfully
+        env:
+          CHECK_RESULTS: ${{ toJSON(needs.*.result) }}
+        run: jq -e 'length == 6 and all(.[]; . == "success")' <<< "$CHECK_RESULTS"

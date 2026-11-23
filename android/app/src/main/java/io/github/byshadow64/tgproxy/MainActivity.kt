@@ -17,6 +17,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,12 +30,12 @@ import io.github.byshadow64.tgproxy.ui.ProxyLinkParser
 
 class MainActivity : ComponentActivity() {
     private val connectionMonitor by lazy { ConnectionMonitor(this) }
-    private var pendingForegroundAction: (() -> Unit)? = null
+    private val foregroundCommands by lazy { ViewModelProvider(this)[ForegroundCommandViewModel::class.java].pending }
     private var updatesRequest by mutableStateOf(0)
     private var incomingHelperLink by mutableStateOf<HelperIpLink?>(null)
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
-        val action = pendingForegroundAction; pendingForegroundAction = null
-        if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) action?.invoke()
+        foregroundCommands.permissionReturned()
+        resumeForegroundCommand()
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,7 +49,7 @@ class MainActivity : ComponentActivity() {
             val updateState = UpdateManager.state.collectAsStateWithLifecycle().value
             val connection = connectionMonitor.state.collectAsStateWithLifecycle().value
             androidx.compose.runtime.LaunchedEffect(updateState.phase) {
-                if (updateState.phase == UpdatePhase.CONFIRM && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) openUpdateInstaller()
+                if (updateState.phase == UpdatePhase.CONFIRM && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) openUpdateInstaller(automatic = true)
             }
             val state = AppRuntime.state.collectAsStateWithLifecycle().value.copy(incomingHelperLink = incomingHelperLink, update = updateState, connection = connection)
             TgProxyApp(state, TgProxyActions(
@@ -67,7 +68,7 @@ class MainActivity : ComponentActivity() {
                 onOpenTelegram = { openTelegram() },
                 onCopyTelegramLink = { copyTelegramLink() },
                 onSaveSettings = { AppRuntime.save(it) },
-                onConnectHelperIp = { host -> requestForegroundPermission { AppRuntime.connectHelperIp(host) } },
+                onConnectHelperIp = { host -> requestForegroundPermission(ForegroundCommand.ConnectHelper(host)) },
                 onCancelHelperConnect = { AppRuntime.cancelHelperConnect() },
                 onOpenImportedTelegramProxy = { openImportedTelegramProxy(it) },
                 onOpenNotificationSettings = { openNotificationSettings() },
@@ -77,7 +78,7 @@ class MainActivity : ComponentActivity() {
                     getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("TG Proxy Helper", link.uri))
                     AppRuntime.showMessage(R.string.link_copied)
                 },
-                onProbeHelperSsh = { host, port, user -> requestForegroundPermission { AppRuntime.probeHelperSsh(host, port, user) } },
+                onProbeHelperSsh = { host, port, user -> requestForegroundPermission(ForegroundCommand.ProbeSsh(host, port, user)) },
                 onConfirmHelperSshKey = { AppRuntime.confirmHelperSshKey() },
                 onDeployHelperSsh = { password, registered, upgrade -> AppRuntime.deployHelperSsh(password, registered, upgrade) },
                 onCancelHelperSsh = { AppRuntime.cancelHelperSsh() },
@@ -103,7 +104,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         UpdateManager.foreground()
-        if (UpdateManager.state.value.phase == UpdatePhase.CONFIRM) openUpdateInstaller()
+        if (UpdateManager.state.value.phase == UpdatePhase.CONFIRM) openUpdateInstaller(automatic = true)
     }
     private fun acceptUpdateIntent(request: Intent?) {
         if (request?.getBooleanExtra("show_updates", false) == true) {
@@ -114,15 +115,16 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         connectionMonitor.start()
+        resumeForegroundCommand()
     }
     override fun onStop() {
         connectionMonitor.stop()
         super.onStop()
     }
-    private fun openUpdateInstaller() {
+    private fun openUpdateInstaller(automatic: Boolean = false) {
         if (!lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return
         if (UpdateManager.state.value.phase == UpdatePhase.CONFIRM) {
-            val next = UpdateManager.takeConfirmation() ?: return
+            val next = UpdateManager.confirmationForLaunch(automatic) ?: return
             try { startActivity(next) } catch (_: Exception) { UpdateManager.confirmationUnavailable() }
         } else if (!packageManager.canRequestPackageInstalls()) {
             try { startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))) }
@@ -140,13 +142,22 @@ class MainActivity : ComponentActivity() {
     }
     private fun requestStart(action: String) {
         if (!AppRuntime.canStart()) return
-        requestForegroundPermission { launchService(action) }
+        requestForegroundPermission(ForegroundCommand.Start(action))
     }
-    private fun requestForegroundPermission(action: () -> Unit) {
+    private fun requestForegroundPermission(command: ForegroundCommand) {
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED && !shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)) {
-            pendingForegroundAction = action
-            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-        } else if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) action()
+            if (foregroundCommands.request(command)) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) executeForegroundCommand(command)
+    }
+    private fun resumeForegroundCommand() {
+        foregroundCommands.take(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))?.let(::executeForegroundCommand)
+    }
+    private fun executeForegroundCommand(command: ForegroundCommand) {
+        when (command) {
+            is ForegroundCommand.Start -> if (AppRuntime.canStart()) launchService(command.action)
+            is ForegroundCommand.ConnectHelper -> AppRuntime.connectHelperIp(command.host)
+            is ForegroundCommand.ProbeSsh -> AppRuntime.probeHelperSsh(command.host, command.port, command.user)
+        }
     }
     private fun launchService(action: String) {
         try {

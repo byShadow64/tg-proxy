@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 
 # Updater copies must dispatch before UI, portable migration, logging and mutexes.
-from utils.update_installer import acknowledge_update, bootstrap_dispatch
+from utils.update_installer import acknowledge_update, bootstrap_dispatch, update_ack_pending
 
 _update_bootstrap_result = bootstrap_dispatch()
 if _update_bootstrap_result is not None:
@@ -55,7 +55,7 @@ from utils.tray_common import (
     acquire_lock, bootstrap, check_ipv6_warning, check_update_async, ctk_run_dialog,
     diagnostics_snapshot,
     ensure_ctk_thread, ensure_dirs, load_config, load_icon, log,
-    proxy_running, quit_ctk, release_lock, restart_proxy,
+    proxy_running, proxy_listener_ready, quit_ctk, release_lock, restart_proxy,
     save_config, start_proxy, stop_proxy, tg_proxy_url,
 )
 from utils.update_check import find_asset, get_status, RELEASES_PAGE_URL
@@ -700,6 +700,35 @@ def _build_menu():
 
 # entry point
 
+STARTUP_ACK_TIMEOUT = 30.0
+_startup_ack_lock = threading.Lock()
+_startup_ack_thread = None
+
+
+def _acknowledge_when_proxy_ready():
+    """Keep Tk/tray startup responsive while waiting for local-listener health."""
+    global _startup_ack_thread
+    if not update_ack_pending():
+        return None
+    with _startup_ack_lock:
+        if _startup_ack_thread is not None and _startup_ack_thread.is_alive():
+            return _startup_ack_thread
+
+        def wait_ready():
+            deadline = time.monotonic() + STARTUP_ACK_TIMEOUT
+            while not _exiting and time.monotonic() < deadline:
+                if proxy_listener_ready():
+                    acknowledge_update()
+                    return
+                if not proxy_running():
+                    break  # Initialization failed; the existing helper owns rollback.
+                time.sleep(.05)
+            log.warning("Updated proxy did not confirm a ready listener; startup ACK withheld")
+
+        _startup_ack_thread = threading.Thread(target=wait_ready, daemon=True, name="update-startup-health")
+        _startup_ack_thread.start()
+        return _startup_ack_thread
+
 def run_tray() -> None:
     global _tray_icon, _config
 
@@ -714,7 +743,7 @@ def run_tray() -> None:
     if pystray is None or Image is None or ctk is None:
         log.error("pystray, Pillow or customtkinter not installed; running in console mode")
         start_proxy(_config, _show_error)
-        acknowledge_update()
+        _acknowledge_when_proxy_ready()
         try:
             while True:
                 time.sleep(1)
@@ -736,7 +765,7 @@ def run_tray() -> None:
         icon.visible = True
         if _instance_activation is not None:
             _instance_activation.start(_activate_existing_dashboard)
-        acknowledge_update()
+        _acknowledge_when_proxy_ready()
 
     _tray_icon.run(setup=_tray_ready)
 

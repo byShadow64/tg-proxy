@@ -66,6 +66,8 @@
   "button.donate": "Donate ♥",
   "validation.bad_host": "Invalid IP address.",
   "validation.bad_port": "Port must be a number between 1 and 65535",
+  "validation.resource_range": "{field}: enter a value from {minimum} to {maximum}.",
+  "error.runtime_config": "Could not apply proxy settings. Check route addresses and numeric values in Settings.",
   "validation.bad_secret_len": "Secret must be exactly 32 hex characters (16 bytes).",
   "validation.bad_secret_hex": "Secret must contain only hex characters (0-9, a-f).",
   "validation.dc_format": "Invalid DC:IP format: {entry}",

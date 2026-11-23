@@ -21,6 +21,7 @@ venv/
 *.pem
 *.pfx
 *.p12
+*.secret
 
 # PyInstaller
 *.manifest
