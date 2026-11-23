@@ -280,11 +280,18 @@ class ElevatedBinaryReplacementTest(unittest.TestCase):
             directory = Path(tmp)
             exe = directory / 'app $(touch unwanted); тест'
             src = directory / 'download with spaces'
-            shutil.copy2(shutil.which('sleep'), exe)
             src.write_bytes(b'new')
-            # A multicall coreutils binary selects sleep from argv[0].
-            # The process still runs the copied executable at the tested path.
-            process = subprocess.Popen(['sleep', '30'], executable=str(exe))
+            cc = shutil.which('cc')
+            if cc is None:
+                self.skipTest('A C compiler is needed for the running executable fixture')
+            # A standalone ELF remains live under the renamed executable path.
+            # Recent Ubuntu ships sleep as a multicall coreutils executable.
+            subprocess.run(
+                [cc, '-x', 'c', '-o', str(exe), '-'],
+                input='#include <unistd.h>\nint main(void) { sleep(30); return 0; }\n',
+                text=True, check=True, timeout=10,
+            )
+            process = subprocess.Popen([str(exe)])
             try:
                 with mock.patch.object(linux_update, '_is_root', return_value=True):
                     cmd = linux_update.replace_binary_cmd(src, exe)
