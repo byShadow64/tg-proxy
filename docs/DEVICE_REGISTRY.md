@@ -44,7 +44,13 @@ The data socket uses a **bearer lease**, not proof-of-possession. Anyone obtaini
 a valid lease can use it until expiry subject to Helper limits; the installation
 signature is checked during registry authentication, not on every data frame.
 Revocation prevents new issuance for that key. Already issued signatures are
-not magically withdrawn; their lifetime is bounded by the lease expiry.
+not withdrawn: a still-valid lease can admit new sockets until it expires, even
+after per-key revocation at the registry. The Helper checks lease/configuration
+validity and the signed configuration's enabled flag when admitting each new data
+socket. Expiry or a refreshed disabled configuration prevents new admissions;
+it does not disconnect an already admitted socket or interrupt a transfer.
+Stopping current sessions requires stopping the Helper data service. Do not treat
+the 600-second lease as an upper bound on an established data socket's lifetime.
 
 A missing registration reclaimed as inactive may be re-enrolled **once using the
 same key**. A denied/revoked key must not take that recovery path. Failed requests
@@ -85,8 +91,14 @@ identity, pin, lease lifetime, connection/frame and bandwidth budgets. Registere
 data frames cannot be empty; each frame is charged at least 4 KiB against the
 resource quota (not a monetary bill). Complete FIN messages and FIFO control/data are preserved. Admission
 must include raw sockets still waiting for TLS. Reconnects and fresh leases must
-not reset a device's traffic budget. Registered traffic permits at most 32 concurrent sessions globally and 2 MiB per
-message, with upstream queue1. Upload reserves the entire bounded message atomically,
+not reset a device's traffic budget. Registered traffic permits at most 32 concurrent
+sessions globally by default. One key may occupy at most the smaller of the signed
+per-key allowance and half the configured global connection limit, rounded down
+(with a minimum of one). The default is therefore 16 sessions per key out of 32;
+renewing a lease does not create a new quota identity. This leaves admission room
+for another key without weakening the global limit. It does not reserve a slot
+for every user or prevent one person registering several keys. Existing private
+token access remains separate. Messages are limited to 2 MiB, with upstream queue1. Upload reserves the entire bounded message atomically,
 then sends one unfragmented binary WebSocket frame; async-iterator fragmentation is
 not compatible with Telegram's initialization path. Default token buckets allow
 4 MiB/s per device with a 2 MiB burst, and 16 MiB/s shared with a 4 MiB burst.

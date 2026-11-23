@@ -22,7 +22,7 @@ if __name__ == '__main__' and (__package__ is None or __package__ == ''):
 from .utils import *
 from .stats import stats
 from .config import (proxy_config, parse_dc_ip_list, start_cfproxy_domain_refresh,
-                     stop_cfproxy_domain_refresh, coerce_domain_list)
+                     stop_cfproxy_domain_refresh, coerce_domain_list, resource_value)
 from .bridge import MsgSplitter, CryptoCtx, do_fallback, bridge_ws_reencrypt, reset_tcp_backoff
 from .raw_websocket import set_sock_opts
 from .fake_tls import verify_client_hello, build_server_hello, FakeTlsStream, TLS_RECORD_HANDSHAKE
@@ -258,9 +258,8 @@ async def _handle_client(reader, writer, secret: bytes):
     peer = writer.get_extra_info('peername')
     label = f"{peer[0]}:{peer[1]}" if peer else "?"
 
-    set_sock_opts(writer.transport, proxy_config.buffer_size)
-
     try:
+        set_sock_opts(writer.transport, proxy_config.buffer_size)
         init = await _read_client_init(
             reader, writer, secret, label, proxy_config.fake_tls_domain)
         if init is None:
@@ -634,16 +633,22 @@ def run_proxy(stop_event: Optional[asyncio.Event] = None):
     asyncio.run(_run(stop_event,))
 
 
-def main():
+def main(*, secret_override=None):
     ap = argparse.ArgumentParser(
         description='Telegram MTProto WebSocket Bridge Proxy')
     ap.add_argument('--port', type=int, default=1443,
                     help='Listen port (default 1443)')
     ap.add_argument('--host', type=str, default='127.0.0.1',
                     help='Listen host (default 127.0.0.1)')
-    ap.add_argument('--secret', type=str, default=None,
+    secret_input = ap.add_mutually_exclusive_group()
+    secret_input.add_argument('--secret', type=str, default=None,
                     help='MTProto proxy secret (32 hex chars). '
-                         'Auto-generated if not provided.')
+                         'Deprecated: use --secret-file to avoid command-line exposure.')
+    secret_input.add_argument('--secret-file', type=str, default=None, metavar='PATH',
+                    help='Read the secret from a small private file (POSIX mode 0600/0400).')
+    ap.add_argument('--show-connection-info', action='store_true',
+                    help='Explicitly display the secret and connection links on the console. '
+                         'Avoid this option when console output is collected as logs.')
     ap.add_argument('--dc-ip', metavar='DC:IP', nargs='?', action='append', const=None,
                     help='Target IP for a DC, e.g. --dc-ip 2:149.154.167.220')
     ap.add_argument('-v', '--verbose', action='store_true',
@@ -704,25 +709,26 @@ def main():
         log.error(str(e))
         sys.exit(1)
 
-    if args.secret:
-        secret_hex = args.secret.strip()
-        if len(secret_hex) != 32:
-            log.error("Secret must be exactly 32 hex characters")
-            sys.exit(1)
-        try:
-            bytes.fromhex(secret_hex)
-        except ValueError:
-            log.error("Secret must be valid hex")
-            sys.exit(1)
-    else:
-        secret_hex = os.urandom(16).hex()
+    from utils.cli_secrets import read_secret_file, redact_secret_arguments, validate_secret
+    redact_secret_arguments(sys.argv)
+    try:
+        if secret_override is not None and (args.secret is not None or args.secret_file is not None):
+            raise ValueError("Choose one secret input")
+        secret_hex = (read_secret_file(args.secret_file) if args.secret_file is not None else
+                      validate_secret(secret_override if secret_override is not None else args.secret)
+                      if secret_override is not None or args.secret is not None else os.urandom(16).hex())
+        resources = {"buf_kb": resource_value("buf_kb", args.buf_kb),
+                     "pool_size": resource_value("pool_size", args.pool_size),
+                     "log_max_mb": resource_value("log_max_mb", args.log_max_mb)}
+    except (OSError, ValueError):
+        ap.error("Invalid secret input or numeric resource settings; use a private --secret-file and values within the documented limits")
 
     proxy_config.port = args.port
     proxy_config.host = args.host
     proxy_config.secret = secret_hex
     proxy_config.dc_redirects = dc_redirects
-    proxy_config.buffer_size = max(4, args.buf_kb) * 1024
-    proxy_config.pool_size = max(0, args.pool_size)
+    proxy_config.buffer_size = resources["buf_kb"] * 1024
+    proxy_config.pool_size = resources["pool_size"]
     proxy_config.fallback_cfproxy = not args.no_cfproxy
     proxy_config.cfproxy_user_domains = coerce_domain_list(args.cfproxy_domain)
     proxy_config.cfproxy_worker_domains = coerce_domain_list(args.cfproxy_worker_domain)
@@ -741,15 +747,19 @@ def main():
     console.setFormatter(SensitiveDataFormatter(
         log_format, datefmt='%H:%M:%S',
         secrets=lambda: (proxy_config.secret, proxy_config.helper_token),
-        allow_connection_info=True,
+        allow_connection_info=args.show_connection_info,
     ))
     root.addHandler(console)
+    if args.secret is not None or secret_override is not None:
+        log.warning("Secret input through argv/environment is deprecated; use a private --secret-file")
+    if not args.show_connection_info:
+        log.info("Connection credentials are hidden; use --secret-file or explicitly --show-connection-info in a trusted terminal")
 
     if args.log_file:
         from utils.logging_setup import build_log_handler
         fh = build_log_handler(
             args.log_file,
-            log_max_mb=args.log_max_mb,
+            log_max_mb=resources["log_max_mb"],
             backups=args.log_backups,
         )
         fh.setFormatter(SensitiveDataFormatter(

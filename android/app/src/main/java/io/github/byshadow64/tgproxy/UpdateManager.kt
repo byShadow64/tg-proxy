@@ -70,7 +70,7 @@ object UpdateManager {
     @Volatile private var manifest: AndroidUpdateManifest? = null
     @Volatile private var verifiedApkSha: String? = null
     @Volatile private var installerActive = false
-    private var confirmation: Intent? = null
+    private val confirmation = InstallConfirmation<Intent>()
     private val preferences get() = context.getSharedPreferences("verified_updates", Context.MODE_PRIVATE)
     // Android's credential-encrypted path may contain an alias; the transport requires a canonical parent.
     private val directory get(): File {
@@ -433,7 +433,7 @@ object UpdateManager {
         if (keep == null) {
             preferences.edit().remove("session").apply()
             installerActive = false
-            synchronized(this) { confirmation = null }
+            confirmation.replace(null)
         } else installerActive = true
     }
 
@@ -466,14 +466,14 @@ object UpdateManager {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 @Suppress("DEPRECATION") val next = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
                 if (next == null) { finishFailedInstallation(session); return }
-                synchronized(this) { confirmation = next }
+                confirmation.replace(next)
                 installerActive = true
                 mutable.update { it.copy(phase = UpdatePhase.CONFIRM) }
             }
             PackageInstaller.STATUS_SUCCESS -> {
                 preferences.edit().remove("session").apply()
                 installerActive = false
-                synchronized(this) { confirmation = null }
+                confirmation.replace(null)
                 cleanupFiles()
                 context.getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
                 mutable.update { it.copy(phase = UpdatePhase.CURRENT, version = "", notes = "", bytes = 0, total = 0) }
@@ -486,12 +486,12 @@ object UpdateManager {
         abandonOwnedSession(session)
         preferences.edit().remove("session").apply()
         installerActive = false
-        synchronized(this) { confirmation = null }
+        confirmation.replace(null)
         mutable.update { it.copy(phase = if (hasVerifiedApk()) UpdatePhase.READY else UpdatePhase.ERROR,
             errorRes = R.string.update_install_error) }
     }
 
-    @Synchronized fun takeConfirmation(): Intent? = confirmation.also { confirmation = null }
+    fun confirmationForLaunch(automatic: Boolean): Intent? = confirmation.forLaunch(automatic)?.let(::Intent)
     fun confirmationUnavailable() {
         scope.launch {
             initializedReady.await()

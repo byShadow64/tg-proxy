@@ -14,22 +14,25 @@ cd tg-proxy
 # Собираем образ
 docker build -t tg-ws-proxy .
 
+# Создаём секрет для подключения. Храните файл отдельно.
+umask 077
+openssl rand -hex 16 > tg-proxy.secret
+sudo chown 10001:10001 tg-proxy.secret
+sudo chmod 0400 tg-proxy.secret
+
 # Запускаем контейнер
 docker run -d \
   --name tg-ws-proxy \
   --restart=always \
   -p 1443:1443 \
+  --mount "type=bind,src=$PWD/tg-proxy.secret,dst=/run/secrets/tg-proxy,readonly" \
+  -e TG_WS_PROXY_SECRET_FILE=/run/secrets/tg-proxy \
   tg-ws-proxy:latest
-
-# Получаем ссылку для подключения
-docker logs tg-ws-proxy 2>&1 | grep 'tg://proxy'
 ```
 
-После выполнения последней команды вы увидите ссылку вида:
-
-```text
-tg://proxy?server=172.17.0.2&port=1443&secret=dd68f127db1d...
-```
+В Telegram укажите адрес сервера и ключ из файла с префиксом `dd`.
+Данные подключения скрыты в журнале. Образ работает с UID/GID 10001.
+При rootless-запуске владелец файла должен соответствовать этому UID внутри контейнера.
 
 ## Настройка параметров
 
@@ -39,26 +42,13 @@ tg://proxy?server=172.17.0.2&port=1443&secret=dd68f127db1d...
 | ----------------------- | --------------------------------- | ------------------------------------- |
 | `TG_WS_PROXY_HOST`      | `Адрес для приёма подключений`    | `0.0.0.0`                             |
 | `TG_WS_PROXY_PORT`      | `Порт внутри контейнера`          | `1443`                                |
-| `TG_WS_PROXY_SECRET`    | `Секретный ключ`                  | `random`                              |
+| `TG_WS_PROXY_SECRET_FILE` | Путь к файлу секрета только для чтения | не задан |
 | `TG_WS_PROXY_DC_IPS`    | `Пары «номер DC:IP» через пробел` | `2:149.154.167.220 4:149.154.167.220` |
 | `TG_WS_PROXY_CF_WORKER` | `Домен Cloudflare Worker`         | `None`                                |
 
-Пример с ручным указанием секрета:
-
-```bash
-docker run -d \
-  --name tg-ws-proxy \
-  --restart=always \
-  -p 1443:1443 \
-  -e TG_WS_PROXY_SECRET="ваш_секрет" \
-  tg-ws-proxy:latest
-```
-
-Для генерации секрета можно использовать:
-
- ```bash
-openssl rand -hex 16  
-```
+Существующие контейнеры с `TG_WS_PROXY_SECRET` продолжат запускаться.
+Перенесите значение в подключаемый файл, чтобы убрать его из окружения контейнера.
+Задавайте только одну из этих переменных.
 
 ## Настройка Telegram Desktop
 
@@ -67,4 +57,4 @@ openssl rand -hex 16
    - **Тип:** MTProto
    - **Сервер:** `127.0.0.1` (или переопределенный вами)
    - **Порт:** `1443` (или переопределенный вами)
-   - **Secret:** из настроек или логов
+   - **Secret:** префикс `dd` и ключ из подключённого файла

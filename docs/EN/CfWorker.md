@@ -24,7 +24,7 @@ workers.dev
    <img width="586" height="379" alt="image" src="https://github.com/user-attachments/assets/ff901439-c2a1-4867-95de-e11b82a37044" />
    <img width="624" height="694" alt="image" src="https://github.com/user-attachments/assets/bb68d49a-166d-42a0-8fe2-bd2b16c0d066" />
 
-5. Click the **`Edit code`** button in the top right, then replace the code on the left with the one [found at the bottom of this page](#worker-code)
+5. Click the **`Edit code`** button in the top right, then replace the code on the left with the one [in telegram-worker.mjs](../../worker/telegram-worker.mjs)
     * If the code section fails to load, it means you missed the first step
     <img width="911" height="117" alt="image" src="https://github.com/user-attachments/assets/6bcdf839-d776-47e9-9d18-ba0efdf53244" />
 	<img width="1027" height="512" alt="image" src="https://github.com/user-attachments/assets/daf131ed-82d5-40f0-a7eb-daeb598bea40" />
@@ -40,90 +40,26 @@ workers.dev
 
 
 
-### Worker Code
+### Worker code
 
-```javascript
-import { connect } from "cloudflare:sockets";
+Use the complete [telegram-worker.mjs](../../worker/telegram-worker.mjs) source.
+Both instructions use this one file; replace the previous sample in full.
 
-function toBytes(data) {
-	if (data instanceof ArrayBuffer) {
-		return new Uint8Array(data);
-	}
-	if (typeof data === "string") {
-		return new TextEncoder().encode(data);
-	}
-	if (data && typeof data.arrayBuffer === "function") {
-		return data.arrayBuffer().then((ab) => new Uint8Array(ab));
-	}
-	return new Uint8Array();
-}
+The Worker accepts binary WebSockets on `/apiws` and connects only to numeric
+addresses in Telegram's IP networks on TCP/443. The catalogue matches the desktop
+client policy, retaining ordinary DC addresses, DC redirects and IPv6. Arbitrary
+addresses and DNS names are rejected. The `binary` subprotocol is negotiated.
 
-export default {
-	async fetch(request) {
-		if ((request.headers.get("Upgrade") || "").toLowerCase() !== "websocket") {
-			return new Response("Expected websocket", { status: 426 });
-		}
+Incoming messages are limited to 2 MiB. The TCP upload queue, including its current
+write, is limited to 4 MiB and 64 messages, and writes run sequentially. A limit or
+connection error closes both endpoints and clears the queue. Telegram connection
+setup has a 10-second deadline. Replies are forwarded in chunks of at most 64 KiB.
+Application routes and update settings are unchanged.
 
-		const url = new URL(request.url);
-		if (url.pathname !== "/apiws") {
-			return new Response("Not found", { status: 404 });
-		}
-
-		const dst = url.searchParams.get("dst");
-		const pair = new WebSocketPair();
-		const client = pair[0];
-		const server = pair[1];
-		server.accept();
-
-		const socket = connect({ hostname: dst, port: 443 });
-		const tcpReader = socket.readable.getReader();
-		const tcpWriter = socket.writable.getWriter();
-
-		server.addEventListener("message", async (event) => {
-			try {
-				await tcpWriter.write(await toBytes(event.data));
-			} catch {
-				try {
-					server.close(1011, "tcp write failed");
-				} catch {}
-			}
-		});
-
-		server.addEventListener("close", async () => {
-			try {
-				await tcpWriter.close();
-			} catch {}
-			try {
-				socket.close();
-			} catch {}
-		});
-
-		(async () => {
-			try {
-				while (true) {
-					const { value, done } = await tcpReader.read();
-					if (done) {
-						break;
-					}
-					if (value) {
-						server.send(value);
-					}
-				}
-			} catch {
-			} finally {
-				try {
-					server.close();
-				} catch {}
-				try {
-					tcpReader.releaseLock();
-				} catch {}
-				try {
-					socket.close();
-				} catch {}
-			}
-		})();
-
-		return new Response(null, { status: 101, webSocket: client });
-	},
-};
-```
+This is a public Telegram-only relay, not an authenticated private Helper. Anyone
+who knows its domain can use it within these constraints. Cloudflare buffers an
+incoming message before invoking the handler and manages the outbound WebSocket
+queue; platform and plan limits also apply. The Worker API has no documented
+outbound drain signal, so bounding the application's queue does not guarantee a
+bound on all platform memory. Updating the client does not update an already
+deployed Worker; apply the new source in your own Cloudflare dashboard.

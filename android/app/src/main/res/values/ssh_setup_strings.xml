@@ -1,4 +1,6 @@
 <resources>
+    <string name="ssh_waiting_body">Настройка Helper ждёт вашего подтверждения. Продолжите её или отмените, чтобы запустить прокси.</string>
+    <string name="ssh_resume">Продолжить настройку Helper</string>
     <string name="ssh_setup_title">Установка Helper по SSH</string>
     <string name="ssh_setup_body">Ubuntu или Debian с доступом root. Мастер загрузит исходники Helper из приложения, установит службу и зарегистрирует сервер. Для проверки сертификата потребуются свободные порты 80 и 443.</string>
     <string name="ssh_port">SSH-порт</string>

@@ -104,7 +104,7 @@ def apply_update(asset: dict, before_restart: Callable[[], None]) -> None:
         with suppress(OSError):
             stage.chmod(0o700)
         installer.acquire_install_lock(exe.parent, token, stage)
-        downloaded, actual_asset = download_release_asset(asset, stage, suffix=".exe",
+        downloaded, actual_asset = download_release_asset(asset, stage, suffix=".exe", require_signed=True,
             progress=lambda count, total: update_progress.set_download(run_id, count, total),
             on_verifying=lambda: update_progress.set_phase(run_id, "verifying"),
             on_candidate=lambda candidate: update_progress.start_download(

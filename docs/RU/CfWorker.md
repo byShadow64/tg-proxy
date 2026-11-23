@@ -22,7 +22,7 @@ workers.dev
    <img width="586" height="379" alt="image" src="https://github.com/user-attachments/assets/ff901439-c2a1-4867-95de-e11b82a37044" />  
    <img width="624" height="694" alt="image" src="https://github.com/user-attachments/assets/bb68d49a-166d-42a0-8fe2-bd2b16c0d066" />
 
-5. Сверху справа нажмите кнопку **`Edit code`**, замените код слева на тот, [что находится внизу этой страницы](./CfWorker.md#код-workerа)
+5. Сверху справа нажмите кнопку **`Edit code`**, замените код слева на тот, [из файла telegram-worker.mjs](../../worker/telegram-worker.mjs)
     * Если у вас не загружается код, то вы не выполнили первый пункт  
     <img width="911" height="117" alt="image" src="https://github.com/user-attachments/assets/6bcdf839-d776-47e9-9d18-ba0efdf53244" />  
 	<img width="1027" height="512" alt="image" src="https://github.com/user-attachments/assets/daf131ed-82d5-40f0-a7eb-daeb598bea40" />
@@ -38,88 +38,26 @@ workers.dev
 
 
 ### Код Worker'а
-```javascript
-import { connect } from "cloudflare:sockets";
 
-function toBytes(data) {
-	if (data instanceof ArrayBuffer) {
-		return new Uint8Array(data);
-	}
-	if (typeof data === "string") {
-		return new TextEncoder().encode(data);
-	}
-	if (data && typeof data.arrayBuffer === "function") {
-		return data.arrayBuffer().then((ab) => new Uint8Array(ab));
-	}
-	return new Uint8Array();
-}
+Используйте целиком [telegram-worker.mjs](../../worker/telegram-worker.mjs).
+Это общий исходник для обеих инструкций; старый пример кода следует заменить полностью.
 
-export default {
-	async fetch(request) {
-		if ((request.headers.get("Upgrade") || "").toLowerCase() !== "websocket") {
-			return new Response("Expected websocket", { status: 426 });
-		}
+Worker принимает только бинарный WebSocket на `/apiws` и соединяется с числовым
+IP из списка сетей Telegram на TCP/443. Список совпадает с политикой настольного
+клиента; обычные адреса DC, перенаправления DC и IPv6 сохраняются. Произвольные
+адреса и доменные имена не разрешены. Обмен использует подпротокол `binary`.
 
-		const url = new URL(request.url);
-		if (url.pathname !== "/apiws") {
-			return new Response("Not found", { status: 404 });
-		}
+Размер входящего сообщения ограничен 2 МиБ. Очередь отправки в TCP, включая
+текущую запись, ограничена 4 МиБ и 64 сообщениями; записи выполняются последовательно.
+Превышение лимита или ошибка закрывает оба конца соединения и освобождает очередь.
+Соединение с Telegram должно установиться за 10 секунд. Данные ответа передаются
+порциями до 64 КиБ. Это не изменяет маршруты и настройки обновлений приложения.
 
-		const dst = url.searchParams.get("dst");
-		const pair = new WebSocketPair();
-		const client = pair[0];
-		const server = pair[1];
-		server.accept();
-
-		const socket = connect({ hostname: dst, port: 443 });
-		const tcpReader = socket.readable.getReader();
-		const tcpWriter = socket.writable.getWriter();
-
-		server.addEventListener("message", async (event) => {
-			try {
-				await tcpWriter.write(await toBytes(event.data));
-			} catch {
-				try {
-					server.close(1011, "tcp write failed");
-				} catch {}
-			}
-		});
-
-		server.addEventListener("close", async () => {
-			try {
-				await tcpWriter.close();
-			} catch {}
-			try {
-				socket.close();
-			} catch {}
-		});
-
-		(async () => {
-			try {
-				while (true) {
-					const { value, done } = await tcpReader.read();
-					if (done) {
-						break;
-					}
-					if (value) {
-						server.send(value);
-					}
-				}
-			} catch {
-			} finally {
-				try {
-					server.close();
-				} catch {}
-				try {
-					tcpReader.releaseLock();
-				} catch {}
-				try {
-					socket.close();
-				} catch {}
-			}
-		})();
-
-		return new Response(null, { status: 101, webSocket: client });
-	},
-};
-```
+Это публичный ретранслятор только для Telegram, а не закрытый Helper с авторизацией.
+Знание домена позволяет использовать его в пределах этих ограничений. Cloudflare
+буферизует входящие сообщения до передачи обработчику и самостоятельно управляет
+исходящей WebSocket-очередью; его лимиты платформы и тарифа действуют дополнительно.
+У API Worker нет документированного сигнала освобождения исходящей очереди,
+поэтому ограничение собственной очереди не гарантирует предел всей памяти платформы.
+Развёрнутый Worker автоматически не меняется при обновлении клиента — новый код
+нужно применить в своей панели Cloudflare.

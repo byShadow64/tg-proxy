@@ -80,15 +80,62 @@ class RegistryAgentTest(unittest.TestCase):
         authorizer = RegistryLeaseAuthorizer(self.public, self.output, bytes.fromhex("ab" * 32), port=8444, clock=lambda: self.now)
         did = p.device_id(self.device.public_key())
         tokens = [p.issue_lease(self.registry, self.helper, did, "ab" * 32, now=1000).encode("ascii") for _ in range(2)]
-        for _ in range(32):
+        for _ in range(16):
             self.assertEqual(did, authorizer.acquire(tokens[0]))
         with self.assertRaisesRegex(p.RegistryError, "quota"):
             authorizer.acquire(tokens[1])
         authorizer.release(did)
         authorizer.acquire(tokens[1])
-        for _ in range(32):
+        for _ in range(16):
             authorizer.release(did)
         self.assertEqual({}, authorizer._counts)
+
+    def test_per_key_fairness_preserves_shared_cap_and_releases_capacity(self):
+        self.refresh()
+        authorizer = RegistryLeaseAuthorizer(self.public, self.output, bytes.fromhex("ab" * 32),
+                                            clock=lambda: self.now, max_registered_connections=4)
+        identities = [p.device_id(ec.generate_private_key(ec.SECP256R1()).public_key()) for _ in range(3)]
+        tokens = [p.issue_lease(self.registry, self.helper, did, "ab" * 32, now=1000).encode() for did in identities]
+        for token in tokens[:2]:
+            for _ in range(2):
+                authorizer.acquire(token)
+            with self.assertRaisesRegex(p.RegistryError, "quota"):
+                authorizer.acquire(token)
+        self.assertEqual(4, sum(authorizer._counts.values()))
+        with self.assertRaisesRegex(p.RegistryError, "quota"):
+            authorizer.acquire(tokens[2])
+        authorizer.release(identities[0])
+        self.assertEqual(identities[2], authorizer.acquire(tokens[2]))
+        for identifier in identities:
+            while identifier in authorizer._counts:
+                authorizer.release(identifier)
+        self.assertEqual({}, authorizer._counts)
+
+    def test_smaller_signed_limit_and_single_global_slot_are_preserved(self):
+        config = self.refresh()
+        config["max_device_connections"] = 1
+        write_configuration(self.output, p.sign_envelope(config, self.registry, context=p.CONFIG_CONTEXT))
+        did = p.device_id(self.device.public_key())
+        token = p.issue_lease(self.registry, self.helper, did, "ab" * 32, now=1000).encode()
+        for global_limit in (1, 32):
+            authorizer = RegistryLeaseAuthorizer(self.public, self.output, bytes.fromhex("ab" * 32),
+                                                clock=lambda: self.now, max_registered_connections=global_limit)
+            self.assertEqual(did, authorizer.acquire(token))
+            with self.assertRaisesRegex(p.RegistryError, "quota"):
+                authorizer.acquire(token)
+            authorizer.release(did)
+
+    def test_lease_expiry_blocks_admission_without_interrupting_admitted_stream(self):
+        self.refresh()
+        token = p.issue_lease(self.registry, self.helper, p.device_id(self.device.public_key()), "ab" * 32, now=1000).encode()
+        authorizer = RegistryLeaseAuthorizer(self.public, self.output, bytes.fromhex("ab" * 32), clock=lambda: self.now)
+        admitted = authorizer.acquire(token)
+        self.now = 1600
+        with self.assertRaises(p.RegistryError):
+            authorizer.acquire(token)
+        # Expiry is an admission boundary, not an unexpected mid-transfer kill.
+        asyncio.run(authorizer.throttle(admitted, 64))
+        authorizer.release(admitted)
 
     def test_stale_disabled_wrong_pin_and_wrong_port_fail_closed(self):
         self.refresh()

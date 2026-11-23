@@ -425,6 +425,11 @@ def acknowledge_update():
         return False
 
 
+def update_ack_pending():
+    """Normal launches need no startup observer; keep the existing ACK protocol unchanged."""
+    return _pending_ack is not None
+
+
 def bootstrap_dispatch(argv=None):
     """Return an exit code for helper modes, None for normal application startup."""
     global _pending_ack

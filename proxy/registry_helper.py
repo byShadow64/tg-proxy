@@ -82,7 +82,12 @@ class RegistryLeaseAuthorizer:
         with self._lock:
             self._prune_buckets(time.monotonic())
             count = self._counts.get(claims.device_id, 0)
-            if (count >= configuration["max_device_connections"] or len(self._counts) >= 256 or
+            # Reserve room for another registered key even when older signed
+            # configurations advertise the whole global allowance per device.
+            # This is key fairness, not Sybil resistance or physical identity.
+            device_limit = min(configuration["max_device_connections"],
+                               max(1, self.max_registered_connections // 2))
+            if (count >= device_limit or len(self._counts) >= 256 or
                     sum(self._counts.values()) >= self.max_registered_connections or
                     (claims.device_id not in self._buckets and len(self._buckets) >= 256)):
                 raise RegistryError("quota")

@@ -14,6 +14,30 @@ class NetworkRecoveryTest {
     private val oldAddress = InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1))
     private val newAddress = InetAddress.getByAddress(byteArrayOf(127, 0, 0, 2))
 
+    @Test fun restartDiscardsDnsFromNetworkChangesWhileServiceWasStopped() {
+        // localhost is resolved by the OS locally: this regression uses no external network.
+        val resolver = BoundedDns::class.java.getDeclaredField("shared").apply { isAccessible = true }.get(BoundedDns)
+        val lock = SharedHostResolver::class.java.getDeclaredField("lock").apply { isAccessible = true }.get(resolver)
+        val field = SharedHostResolver::class.java.getDeclaredField("cache").apply { isAccessible = true }
+        fun cached() = synchronized(lock) { (field.get(resolver) as Map<*, *>).containsKey("localhost") }
+        ProxyEngine(EngineConfig(freePort(), "51".repeat(16))).use { engine ->
+            engine.start()
+            SessionIo().use { assertTrue(BoundedDns.resolveAll("localhost", it).isNotEmpty()) }
+            await { cached() }
+            // A rejected duplicate start must not invalidate the running proxy's DNS.
+            try { engine.start(); fail() } catch (error: EngineException) {
+                assertEquals(EngineFailureCode.ALREADY_RUNNING, error.code)
+            }
+            assertTrue(cached())
+            engine.stop()
+            // No monitor exists during the stopped interval. A fresh start must
+            // discard the old positive answer without waiting for its 60s TTL.
+            engine.start()
+            assertFalse(cached())
+            SessionIo().use { assertTrue(BoundedDns.resolveAll("localhost", it).isNotEmpty()) }
+        }
+    }
+
     @Test fun changedNetworkDropsDnsCacheBeforeItsNormalTtl() {
         val calls = AtomicInteger()
         SharedHostResolver({ if (calls.incrementAndGet() == 1) listOf(oldAddress) else listOf(newAddress) }).use { resolver ->

@@ -64,7 +64,7 @@
     {
       "path": "proxy/__init__.py",
       "size": 274,
-      "sha256": "7e900fd3df32b4323645ec30a54c8811150fb08aa4b218f376d7ead8e6299e6d"
+      "sha256": "fa0a2399d8739172c8e2447a4f78447913096ca5e5841ec28469d371ea60598f"
     },
     {
       "path": "proxy/balancer.py",
@@ -73,8 +73,8 @@
     },
     {
       "path": "proxy/config.py",
-      "size": 9172,
-      "sha256": "86d02e50833b22fb76d89bf592632b8dcb2ee954724004c3311caa202042e2e9"
+      "size": 10188,
+      "sha256": "036de79ef34ee3666ab863b682359cb68348b5a72e77e7be45376e23375e9c8e"
     },
     {
       "path": "proxy/http_transport.py",
@@ -88,8 +88,8 @@
     },
     {
       "path": "proxy/registry_helper.py",
-      "size": 8111,
-      "sha256": "f1327ebc88f9db3fa293c84be8e51a844611bd27403270aa582541a022e035c7"
+      "size": 8467,
+      "sha256": "f83f7f35473357639a5a80355a57338a801cb77213e1f519d9126e597a3febc6"
     },
     {
       "path": "proxy/registry_protocol.py",

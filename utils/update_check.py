@@ -153,7 +153,13 @@ def fetch_backup_release(server_url: str, timeout: float = 12.0) -> dict:
     req = Request(server_url, headers={"Accept": "application/json", "User-Agent": "tg-ws-proxy-update-check"})
     with _open_response(req, timeout=timeout, response_timeout=timeout) as resp:
         _response_url(resp, server_url)
-        return verify_manifest(_read_bounded(resp, MAX_MANIFEST_BYTES, timeout), TRUSTED_UPDATE_KEYS)
+        raw = _read_bounded(resp, MAX_MANIFEST_BYTES, timeout)
+        release = verify_manifest(raw, TRUSTED_UPDATE_KEYS)
+        for asset in release["assets"]:
+            # Public proof only, kept in the process-local discovery snapshot.
+            # Install-time authorization fetches and verifies a fresh manifest.
+            asset["_signed_manifest"] = raw
+        return release
 
 
 def _extract_assets(data: dict) -> list:
@@ -182,7 +188,8 @@ def _compatible_asset_names():
 
 def _installable(assets):
     names = _compatible_asset_names()
-    return any(a.get("name") in names and _valid_asset(a) for a in assets)
+    return any(a.get("name") in names and _valid_asset(a)
+               and (not a.get("name", "").startswith("TgWsProxy_windows") or has_signed_authorization(a)) for a in assets)
 
 
 def _valid_asset(asset):
@@ -192,6 +199,48 @@ def _valid_asset(asset):
         return False
     digest = asset.get("digest")
     return isinstance(digest, str) and bool(_SHA256.fullmatch(digest))
+
+
+def _matching_signed_asset(asset, release):
+    """A GitHub digest is integrity metadata, not executable authorization."""
+    if release.get("latest") != asset.get("version"):
+        raise ValueError("The signed update version does not match")
+    digest = asset.get("digest")
+    if not isinstance(digest, str) or not _SHA256.fullmatch(digest):
+        raise ValueError("The update has no valid checksum")
+    for candidate in release["assets"]:
+        if candidate["name"] != asset.get("name"):
+            continue
+        if candidate["digest"].lower() != digest.lower():
+            raise ValueError("The signed update checksum does not match")
+        supplied_size = asset.get("size")
+        if supplied_size is not None and (type(supplied_size) is not int or supplied_size != candidate["size"]):
+            raise ValueError("The signed update size does not match")
+        return candidate
+    raise ValueError("The signed update has no compatible asset")
+
+
+def has_signed_authorization(asset):
+    """Recheck the signed discovery proof before offering a Windows install."""
+    try:
+        raw = asset.get("_signed_manifest")
+        release = verify_manifest(raw, TRUSTED_UPDATE_KEYS)
+        _matching_signed_asset(asset, release)
+        return True
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
+
+
+def authorize_release_asset(asset):
+    """Fetch fresh publisher authorization; never trust a cached flag or hash alone."""
+    current, version = asset.get("current_version"), asset.get("version")
+    if not current or not version or not _version_gt(version, current):
+        raise ValueError("The release is not newer than the installed application")
+    release = fetch_backup_release(asset.get("manifest_url") or UPDATE_MANIFEST_URL)
+    signed = _matching_signed_asset(asset, release)
+    authorized = dict(asset)
+    authorized.update(size=signed["size"], _signed_manifest=signed["_signed_manifest"])
+    return authorized
 
 
 def _log_version(value) -> str:
@@ -304,6 +353,14 @@ def run_check(current_version: str, server_url: Optional[str] = None) -> None:
             log.info("Резервный сервер: подпись манифеста проверена; версия %s", _log_version(latest))
             backup.update(has_update=_version_gt(latest, current_version),
                           ahead_of_release=_version_gt(current_version, latest))
+            if primary is not None:
+                for asset in primary["assets"]:
+                    try:
+                        signed = _matching_signed_asset(asset, backup)
+                    except ValueError:
+                        continue
+                    if "_signed_manifest" in signed:
+                        asset.update(size=signed["size"], _signed_manifest=signed["_signed_manifest"])
             if (primary is None or _version_gt(latest, primary["latest"])
                     or (not _version_gt(primary["latest"], latest)
                         and backup["has_update"] and _installable(backup["assets"])
@@ -419,13 +476,14 @@ def download_release_asset(
     *, progress: Optional[Callable[[int, Optional[int]], None]] = None,
     on_verifying: Optional[Callable[[], None]] = None,
     on_candidate: Optional[Callable[[dict], None]] = None,
+    require_signed: bool = False,
 ):
     """Return (verified file, actual metadata), retrying a failed GitHub asset.
 
     The fallback can never downgrade the requested release or the installed app.
     Callers must use the returned metadata for any subsequent verification.
     """
-    asset = dict(asset)
+    asset = authorize_release_asset(dict(asset)) if require_signed else dict(asset)
     if asset.get("version") and asset.get("current_version") and not _version_gt(asset["version"], asset["current_version"]):
         raise ValueError("The release is not newer than the installed application")
 
@@ -451,6 +509,10 @@ def download_release_asset(
             raise ValueError("The backup release would downgrade the requested update") from None
         for candidate in backup["assets"]:
             if candidate["name"] == asset["name"]:
+                if require_signed:
+                    # Never silently replace an authorized pending GitHub
+                    # executable with another version or different bytes.
+                    _matching_signed_asset(asset, backup)
                 candidate.update(current_version=current, manifest_url=url)
                 return download(candidate), dict(candidate)
         raise ValueError("The backup has no compatible release asset") from None
@@ -460,6 +522,8 @@ def find_asset(name: str) -> Optional[Dict[str, Any]]:
     """Find an asset suitable for automatic installation."""
     for asset in _state["assets"]:
         if asset.get("name") == name and _valid_asset(asset):
+            if name.startswith("TgWsProxy_windows") and not has_signed_authorization(asset):
+                return None
             if asset.get("version") and asset.get("current_version") and not _version_gt(asset["version"], asset["current_version"]):
                 return None
             return dict(asset)

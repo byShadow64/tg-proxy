@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import socket
 from copy import deepcopy
 from dataclasses import dataclass
@@ -9,6 +8,7 @@ from typing import Union
 from proxy import coerce_domain_list, parse_dc_ip_list
 from ui.i18n import t
 from utils.helper_config import helper_is_enabled
+from proxy.config import RESOURCE_LIMITS, resource_value
 
 UI_ONLY_KEYS = frozenset({
     "appearance", "autostart", "check_updates", "auto_install_updates", "language"
@@ -73,12 +73,10 @@ def validate_settings(values: dict, defaults: dict) -> Union[dict, str]:
 
     for key in ("buf_kb", "pool_size", "log_max_mb"):
         try:
-            value = float(values[key].strip())
-            if not math.isfinite(value):
-                raise ValueError
-            config[key] = int(value) if key != "log_max_mb" else value
-        except (ValueError, OverflowError):
-            config[key] = defaults[key]
+            config[key] = resource_value(key, values[key])
+        except (ValueError, TypeError, KeyError):
+            low, high = RESOURCE_LIMITS[key]
+            return t("validation.resource_range", field=t("label." + key), minimum=low, maximum=high)
 
     for key in ("cfproxy_user_domain", "cfproxy_worker_domain"):
         if key in config:

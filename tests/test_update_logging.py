@@ -11,6 +11,7 @@ from urllib.error import HTTPError, URLError
 from proxy.config import ProxyConfig
 from utils import tray_common, update_check
 from utils.live_logs import LiveLogHandler
+from tests.signed_update_fixtures import KEYS, signed_release
 
 
 ASSET_NAME = 'TgWsProxy_windows.exe'
@@ -31,15 +32,7 @@ def github(version='1.14.5', *, installable=True):
 
 
 def backup(version='1.14.5'):
-    return {
-        'latest': version, 'source': 'backup', 'html_url': 'https://updates.invalid/releases',
-        'notes': 'do-not-log-signed-notes',
-        'assets': [{
-            'name': ASSET_NAME,
-            'url': 'https://updates.invalid/application.exe?token=do-not-log-backup-token',
-            'digest': DIGEST,
-        }],
-    }
+    return signed_release(version, DIGEST)
 
 
 class UpdateCheckLoggingTest(unittest.TestCase):
@@ -49,6 +42,7 @@ class UpdateCheckLoggingTest(unittest.TestCase):
         self.stack.enter_context(patch.object(update_check, '_state', update_check.get_status()))
         self.stack.enter_context(patch.object(update_check, '_compatible_asset_names', return_value={ASSET_NAME}))
         self.stack.enter_context(patch.object(update_check, 'UPDATE_MANIFEST_URL', 'https://updates.invalid/latest.json'))
+        self.stack.enter_context(patch.object(update_check, 'TRUSTED_UPDATE_KEYS', KEYS))
         self.primary = self.stack.enter_context(patch.object(update_check, 'fetch_latest_release'))
         self.reserve = self.stack.enter_context(patch.object(update_check, 'fetch_backup_release'))
 
@@ -64,11 +58,12 @@ class UpdateCheckLoggingTest(unittest.TestCase):
         self.outcome = outcomes[0]
         return '\n'.join(self.messages)
 
-    def test_github_update_is_visible_at_info_without_contacting_backup(self):
+    def test_github_update_is_visible_at_info_after_matching_signed_authorization(self):
         self.primary.return_value = github()
+        self.reserve.return_value = backup()
         output = self.check()
-        self.reserve.assert_not_called()
-        self.assertEqual([record.levelno for record in self.records], [logging.INFO] * 4)
+        self.reserve.assert_called_once()
+        self.assertTrue(all(record.levelno == logging.INFO for record in self.records))
         self.assertIn('текущая версия 1.14.4', self.messages[0])
         self.assertIn('обращаемся к GitHub', self.messages[1])
         self.assertIn('GitHub: опубликована версия 1.14.5', self.messages[2])
@@ -213,7 +208,8 @@ class ManagedUpdateLogsTest(unittest.TestCase):
                     stack.enter_context(patch.object(update_check, '_state', update_check.get_status()))
                     stack.enter_context(patch.object(update_check, '_compatible_asset_names', return_value={ASSET_NAME}))
                     stack.enter_context(patch.object(update_check, 'fetch_latest_release', return_value=github()))
-                    stack.enter_context(patch.object(update_check, 'fetch_backup_release'))
+                    stack.enter_context(patch.object(update_check, 'fetch_backup_release', return_value=backup()))
+                    stack.enter_context(patch.object(update_check, 'TRUSTED_UPDATE_KEYS', KEYS))
                     tray_common.setup_logging(verbose=False)
                     update_check.run_check('1.14.4')
                     updater.debug('hidden-debug-update-detail')

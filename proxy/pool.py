@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Tuple
 
 from .raw_websocket import RawWebSocket, WsHandshakeError
 from .stats import stats
-from .config import proxy_config
+from .config import proxy_config, bounded_pool_size
 from .route_policy import require_direct_route, require_telegram_ip
 from .utils import ws_domains, DC_DEFAULT_IPS, DC_TEST_IPS, WS_PATH, WS_PATH_TEST
 
@@ -33,7 +33,7 @@ class _WsPool:
     async def get(self, dc: int, is_media: bool, *, is_test_dc: bool = False
                   ) -> Optional[RawWebSocket]:
         target_ip = proxy_config.dc_redirects.get(dc)
-        if (not target_ip or proxy_config.pool_size <= 0
+        if (not target_ip or bounded_pool_size(proxy_config.pool_size) <= 0
                 or (is_test_dc and dc not in DC_TEST_IPS)):
             return None
         try:
@@ -71,7 +71,7 @@ class _WsPool:
                 or ws.reader.exception() is not None)
 
     def _schedule_refill(self, key, target_ip, domains):
-        if proxy_config.pool_size <= 0:
+        if bounded_pool_size(proxy_config.pool_size) <= 0:
             return
         self._schedule_rotation(key, target_ip, domains)
         if (key in self._refilling
@@ -86,7 +86,7 @@ class _WsPool:
         adopted = set()
         try:
             bucket = self._idle.setdefault(key, deque())
-            needed = proxy_config.pool_size - len(bucket)
+            needed = bounded_pool_size(proxy_config.pool_size) - len(bucket)
             if needed <= 0:
                 return
             connected = 0
@@ -142,7 +142,7 @@ class _WsPool:
     async def _rotate(self, key, target_ip, domains):
         dc, is_media, is_test_dc = key
         try:
-            while proxy_config.pool_size > 0:
+            while bounded_pool_size(proxy_config.pool_size) > 0:
                 bucket = self._idle.setdefault(key, deque())
                 now = time.monotonic()
                 expired = []
@@ -163,7 +163,7 @@ class _WsPool:
                         dc, 't' if is_test_dc else '', 'm' if is_media else '',
                         len(expired), len(bucket))
 
-                if len(bucket) < proxy_config.pool_size:
+                if len(bucket) < bounded_pool_size(proxy_config.pool_size):
                     self._schedule_refill(key, target_ip, domains)
 
                 wake_at = now + self.WS_POOL_CHECK_INTERVAL
@@ -293,7 +293,7 @@ class _CfWorkerPool:
     async def _refill(self, dc, fallback_dst, worker_domains):
         try:
             bucket = self._idle.setdefault(dc, deque())
-            target_size = min(proxy_config.pool_size, self.PER_DC_LIMIT)
+            target_size = min(bounded_pool_size(proxy_config.pool_size), self.PER_DC_LIMIT)
             needed = target_size - len(bucket)
             if needed <= 0:
                 return

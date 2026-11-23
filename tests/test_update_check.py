@@ -16,6 +16,7 @@ from urllib.error import HTTPError, URLError
 
 from utils import update_check
 from utils.update_check import _extract_assets, _parse_version_tuple, _version_gt
+from tests.signed_update_fixtures import KEYS, signed_release
 
 PAYLOAD = b'payload'
 DIGEST = 'sha256:' + hashlib.sha256(PAYLOAD).hexdigest()
@@ -228,6 +229,7 @@ class BackupCheckTest(unittest.TestCase):
         self.stack.enter_context(mock.patch.object(update_check, '_state', update_check.get_status()))
         self.stack.enter_context(mock.patch.object(update_check, '_compatible_asset_names', return_value={'TgWsProxy_windows.exe'}))
         self.stack.enter_context(mock.patch.object(update_check, 'UPDATE_MANIFEST_URL', 'https://backup.invalid/latest.json'))
+        self.stack.enter_context(mock.patch.object(update_check, 'TRUSTED_UPDATE_KEYS', KEYS))
         self.primary = self.stack.enter_context(mock.patch.object(update_check, 'fetch_latest_release'))
         self.backup = self.stack.enter_context(mock.patch.object(update_check, 'fetch_backup_release'))
 
@@ -237,15 +239,13 @@ class BackupCheckTest(unittest.TestCase):
                             'size': len(PAYLOAD), 'digest': digest}]}
 
     def fallback(self, version='1.14.0'):
-        return {'latest': version, 'html_url': 'https://backup.invalid/releases/' + version,
-                'source': 'backup', 'assets': [{'name': 'TgWsProxy_windows.exe',
-                'url': 'https://backup.invalid/a.exe', 'digest': DIGEST, 'size': len(PAYLOAD),
-                'version': version, 'source': 'backup'}]}
+        return signed_release(version, DIGEST, len(PAYLOAD))
 
-    def test_healthy_newer_compatible_github_release_is_preferred_without_backup_request(self):
+    def test_healthy_github_release_is_preferred_after_matching_signed_authorization(self):
         self.primary.return_value = self.release()
+        self.backup.return_value = self.fallback()
         update_check.run_check('1.13.0')
-        self.backup.assert_not_called()
+        self.backup.assert_called_once()
         status = update_check.get_status()
         self.assertEqual(status['source'], 'github')
         self.assertTrue(status['has_update'])
@@ -685,8 +685,8 @@ class SecureDownloadTest(unittest.TestCase):
 
     def test_manifest_fetch_is_bounded_and_invokes_signature_verifier(self):
         with mock.patch.object(update_check, 'build_github_opener', _opener(_Response(b'signed'))), \
-                mock.patch.object(update_check, 'verify_manifest', return_value={'latest': '1.14.0'}) as verify:
-            self.assertEqual(update_check.fetch_backup_release('https://backup.invalid/latest.json'), {'latest': '1.14.0'})
+                mock.patch.object(update_check, 'verify_manifest', return_value={'latest': '1.14.0', 'assets': []}) as verify:
+            self.assertEqual(update_check.fetch_backup_release('https://backup.invalid/latest.json'), {'latest': '1.14.0', 'assets': []})
         verify.assert_called_once_with(b'signed', update_check.TRUSTED_UPDATE_KEYS)
         with mock.patch.object(update_check, 'build_github_opener', _opener(_Response(b'x' * (update_check.MAX_MANIFEST_BYTES + 1)))):
             with self.assertRaises(ValueError):

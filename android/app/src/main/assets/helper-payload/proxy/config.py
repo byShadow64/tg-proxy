@@ -19,6 +19,37 @@ from .http_transport import response_with_deadline
 
 log = logging.getLogger('tg-mtproto-proxy')
 
+# Shared UI/CLI/runtime ceilings prevent a local typo from allocating an
+# unbounded socket pool or requesting buffers outside the socket integer range.
+RESOURCE_LIMITS = {
+    "buf_kb": (4, 4096),
+    "pool_size": (0, 32),
+    "log_max_mb": (1 / 32, 1024),
+}
+
+
+def resource_value(name, value):
+    low, high = RESOURCE_LIMITS[name]
+    try:
+        parsed = float(value.strip()) if isinstance(value, str) else value
+        if type(parsed) not in (int, float) or not low <= parsed <= high:
+            raise ValueError
+        if name != "log_max_mb":
+            if parsed != int(parsed):
+                raise ValueError
+            return int(parsed)
+        return float(parsed)
+    except (ValueError, TypeError, OverflowError):
+        raise ValueError(f"Invalid resource setting: {name}") from None
+
+
+def bounded_pool_size(value):
+    """A malformed direct/internal caller cannot bypass the pool ceiling."""
+    try:
+        return resource_value("pool_size", value)
+    except ValueError:
+        return 0
+
 CFPROXY_DOMAINS_URL = f"{RAW_CONTENT_URL}/.github/cfproxy-domains.txt"
 
 _CFPROXY_ENC: List[str] = [

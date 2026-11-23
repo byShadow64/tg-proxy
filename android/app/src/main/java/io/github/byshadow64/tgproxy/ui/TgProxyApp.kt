@@ -174,7 +174,7 @@ fun TgProxyApp(state: TgProxyUiState, actions: TgProxyActions, updatesRequest: I
             },
         ) { padding ->
             when (selectedTab) {
-                0 -> Overview(state, actions, Modifier.padding(padding))
+                0 -> Overview(state, actions, { selectedTab = 1 }, Modifier.padding(padding))
                 1 -> Routes(
                     state = state,
                     draft = draft,
@@ -458,18 +458,33 @@ private fun AppHeader() {
 }
 
 @Composable
-private fun Overview(state: TgProxyUiState, actions: TgProxyActions, modifier: Modifier) {
+private fun Overview(state: TgProxyUiState, actions: TgProxyActions, onResumeSshSetup: () -> Unit, modifier: Modifier) {
     val running = state.status == ProxyStatus.RUNNING
+    val waitingForSsh = state.sshSetup.phase in setOf(SshSetupPhase.CONFIRM_HOST_KEY, SshSetupPhase.READY)
     val busy = state.status == ProxyStatus.STARTING || state.status == ProxyStatus.STOPPING ||
         state.isSaving || state.pairingStatus == PairingStatus.CONNECTING ||
-        state.sshSetup.phase in setOf(SshSetupPhase.PROBING, SshSetupPhase.CONFIRM_HOST_KEY,
-            SshSetupPhase.READY, SshSetupPhase.DEPLOYING, SshSetupPhase.VERIFYING)
+        state.sshSetup.phase in setOf(SshSetupPhase.PROBING, SshSetupPhase.DEPLOYING, SshSetupPhase.VERIFYING)
     LazyColumn(
         modifier.fillMaxSize().testTag("overview_content"),
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item { StatusHero(state) }
+        if (waitingForSsh) {
+            item(key = "ssh_pending_notice") {
+                Column(Modifier.fillMaxWidth().testTag("ssh_pending_notice"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.ssh_waiting_body), style = MaterialTheme.typography.bodyMedium)
+                    OutlinedButton(onClick = onResumeSshSetup,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("ssh_resume")) {
+                        Text(stringResource(R.string.ssh_resume))
+                    }
+                    TextButton(onClick = actions.onResetHelperSsh,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("ssh_pending_reset")) {
+                        Text(stringResource(R.string.ui_cancel))
+                    }
+                }
+            }
+        }
         if (state.connection == ConnectionAvailability.OFFLINE) {
             item(key = "offline_notice") { Notice(stringResource(R.string.connection_offline_body), false) }
         }
@@ -482,7 +497,7 @@ private fun Overview(state: TgProxyUiState, actions: TgProxyActions, modifier: M
         item {
             Button(
                 onClick = if (running) actions.onStop else actions.onStart,
-                enabled = !busy,
+                enabled = !busy && !waitingForSsh,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("proxy_action"),
                 shape = RoundedCornerShape(18.dp),
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
@@ -492,7 +507,7 @@ private fun Overview(state: TgProxyUiState, actions: TgProxyActions, modifier: M
                 ) else ButtonDefaults.buttonColors(),
             ) {
                 if (busy) {
-                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    CircularProgressIndicator(Modifier.size(20.dp).testTag("proxy_progress"), strokeWidth = 2.dp)
                 } else {
                     Glyph(if (running) AppIcon.STOP else AppIcon.PLAY, Modifier.size(20.dp))
                 }
@@ -504,7 +519,7 @@ private fun Overview(state: TgProxyUiState, actions: TgProxyActions, modifier: M
             }
         }
         state.statusMessage?.let { message -> item { Notice(message, state.status == ProxyStatus.ERROR) } }
-        item { TelegramConnectionCard(running, !busy, actions) }
+        item { TelegramConnectionCard(running, !busy && !waitingForSsh, actions) }
         item {
             Column(Modifier.testTag("session_metrics"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 AppCard {

@@ -118,7 +118,7 @@ def set_sock_opts(transport, buffer_size):
     try:
         sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_RCVBUF, buffer_size)
         sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_SNDBUF, buffer_size)
-    except OSError:
+    except (OSError, OverflowError, ValueError, TypeError, AttributeError):
         pass
 
 

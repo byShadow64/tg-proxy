@@ -20,6 +20,7 @@ from ui import update_button
 from ui.ctk_theme import apply_ctk_appearance, ctk_theme_for_platform
 from ui.i18n import get_config_language, set_language, t
 from utils import update_check, update_progress
+from tests.signed_update_fixtures import KEYS, signed_release
 
 _NATIVE_MODE = "--native-run" in sys.argv
 
@@ -80,8 +81,9 @@ if _NATIVE_MODE:
             self.stack.enter_context(mock.patch.object(update_button.sys, "frozen", True, create=True))
             self.stack.enter_context(mock.patch.object(
                 update_button, "asset_name", return_value="TgWsProxy_windows.exe"))
-            # These legacy sidebar scenarios mock GitHub only. Signed backup
-            # discovery has its own isolated tests and must not contact a server.
+            # Update scenarios provide ephemeral signed metadata, while every
+            # transport remains mocked. A GitHub digest alone cannot authorize EXE.
+            self.stack.enter_context(mock.patch.object(update_check, "TRUSTED_UPDATE_KEYS", KEYS))
             self.stack.enter_context(mock.patch.object(update_check, "UPDATE_MANIFEST_URL", ""))
             self.opener = self.stack.enter_context(mock.patch.object(
                 update_check, "build_github_opener", side_effect=AssertionError("Real network is forbidden"),
@@ -143,17 +145,29 @@ if _NATIVE_MODE:
             self.pump(60)
             return window, view
 
-        def check_release(self, view, version, *, include_asset=True):
-            with mock.patch.object(update_check, "fetch_latest_release", return_value={
-                "tag_name": f"v{version}", "html_url": update_check.RELEASES_PAGE_URL,
-                "assets": [{"name": "TgWsProxy_windows.exe",
-                            "browser_download_url": "https://example.org/TgWsProxy_windows.exe",
-                            "digest": "sha256:" + "a" * 64, "size": 4096}]
-                          if include_asset else [],
-            }) as fetch:
+        def check_release(self, view, version, *, include_asset=True, authorized=True):
+            with ExitStack() as stack:
+                if include_asset and authorized:
+                    manifest_url = "https://backup.invalid/latest.json"
+                    stack.enter_context(mock.patch.object(update_check, "UPDATE_MANIFEST_URL", manifest_url))
+                    backup = stack.enter_context(mock.patch.object(
+                        update_check, "fetch_backup_release", return_value=signed_release(version, "a" * 64, 4096)))
+                else:
+                    backup = None
+                fetch = stack.enter_context(mock.patch.object(update_check, "fetch_latest_release", return_value={
+                    "tag_name": f"v{version}", "html_url": update_check.RELEASES_PAGE_URL,
+                    "assets": [{"name": "TgWsProxy_windows.exe",
+                                "browser_download_url": "https://example.org/TgWsProxy_windows.exe",
+                                "digest": "sha256:" + "a" * 64, "size": 4096}]
+                              if include_asset else [],
+                }))
                 view.button.invoke()
                 self.until(lambda: not view.task.running)
                 fetch.assert_called_once_with()
+                if backup is not None:
+                    backup.assert_called_once_with(manifest_url)
+                    self.assertEqual(update_check.get_status()["source"], "github")
+                    self.assertTrue(update_check.has_signed_authorization(update_check.get_status()["assets"][0]))
 
         def assertInside(self, widget, parent):
             self.assertTrue(widget.winfo_ismapped())
@@ -248,14 +262,7 @@ if _NATIVE_MODE:
                             if source == "github":
                                 self.check_release(view, "99.0.0")
                             else:
-                                backup = {
-                                    "latest": "99.0.0", "html_url": "https://example.org/releases",
-                                    "source": "backup", "assets": [{
-                                        "name": "TgWsProxy_windows.exe",
-                                        "url": "https://example.org/TgWsProxy_windows.exe",
-                                        "digest": "sha256:" + "b" * 64, "size": 8192,
-                                    }],
-                                }
+                                backup = signed_release("99.0.0", "b" * 64, 8192)
                                 error = HTTPError(update_check.RELEASES_LATEST_API, 404, "Not Found", {}, None)
                                 with mock.patch.object(update_check, "UPDATE_MANIFEST_URL", "https://example.org/latest.json"), \
                                         mock.patch.object(update_check, "fetch_latest_release", side_effect=error), \
@@ -282,6 +289,9 @@ if _NATIVE_MODE:
             with mock.patch.object(update_button.sys, "frozen", False):
                 self.check_release(view, "99.0.0")
                 self.assertEqual(view.action.cget("text"), "Release page")
+            self.check_release(view, "99.0.0", authorized=False)
+            self.assertEqual(view.action.cget("text"), "Release page")
+            self.assertFalse(update_check.has_signed_authorization(update_check.get_status()["assets"][0]))
             self.check_release(view, "99.0.0", include_asset=False)
             self.assertEqual(view.action.cget("text"), "Release page")
             view.action.invoke()
